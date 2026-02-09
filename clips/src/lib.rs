@@ -1,5 +1,5 @@
 use clips_sys::clips;
-use std::{borrow::Cow, ffi::CString, fmt::Display, marker, path::Path};
+use std::{borrow::Cow, ffi::CString, fmt::Display, path::Path};
 
 #[derive(Debug)]
 pub enum ClipsError {
@@ -72,18 +72,39 @@ impl Environment {
     pub fn run(&mut self, limit: i64) -> i64 {
         unsafe { clips::Run(self.raw, limit) }
     }
+
+    pub fn fact_builder(&self, template_name: &str) -> FactBuilder {
+        FactBuilder::new(self, template_name)
+    }
 }
 
 #[derive(Debug)]
-pub struct Fact<'env> {
+pub struct FactBuilder {
+    raw: *mut clips::FactBuilder,
+}
+
+impl FactBuilder {
+    fn new(env: &Environment, template_name: &str) -> Self {
+        let template_name_cstr = CString::new(template_name).unwrap();
+        let raw = unsafe { clips::CreateFactBuilder(env.raw, template_name_cstr.as_ptr() as *const i8) };
+        Self { raw }
+    }
+}
+
+impl Drop for FactBuilder {
+    fn drop(&mut self) {
+        unsafe { clips::FBDispose(self.raw) };
+    }
+}
+
+#[derive(Debug)]
+pub struct Fact {
     raw: *const clips::Fact,
-    _marker: marker::PhantomData<&'env Environment>,
 }
 
 #[derive(Debug)]
-pub struct Instance<'env> {
+pub struct Instance {
     raw: *mut clips::Instance,
-    _marker: marker::PhantomData<&'env Environment>,
 }
 
 #[derive(Debug)]
@@ -97,14 +118,39 @@ pub enum ClipsValue<'env> {
     Integer(i64),
     Void(),
     Multifield(Vec<ClipsValue<'env>>),
-    Fact(Fact<'env>),
+    Fact(Fact),
     InstanceName(Cow<'env, str>),
-    Instance(Instance<'env>),
+    Instance(Instance),
     ExternalAddress(ExternalAddress),
 }
 
 impl Drop for Environment {
     fn drop(&mut self) {
         unsafe { clips::DestroyEnvironment(self.raw) };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_environment_creation() {
+        let env = Environment::new();
+        assert!(env.is_ok());
+    }
+
+    #[test]
+    fn test_environment_clear() {
+        let mut env = Environment::new().unwrap();
+        let result = env.clear();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_load_from_string() {
+        let mut env = Environment::new().unwrap();
+        let result = env.load_from_str("(deftemplate test_deftemplate)");
+        assert!(result.is_ok());
     }
 }
