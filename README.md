@@ -13,13 +13,13 @@ This repository is a Cargo workspace containing two crates:
 - Tested against CLIPS version 6.4 (update as needed).
 
 ## Requirements
-To use CLIPS, you need to populate the `clips` directory with the CLIPS source code. You can do this by running the following commands:
+To use CLIPS, you need to populate the `clips_source` directory with the CLIPS source code. You can do this by running the following commands:
 
 ```bash
 wget -O clips_642.zip https://sourceforge.net/projects/clipsrules/files/CLIPS/6.4.2/clips_core_source_642.zip/download
 unzip clips_642.zip -d clips_temp
-mkdir clips
-mv clips_temp/clips_core_source_642/core/* clips/
+mkdir clips_source
+mv clips_temp/clips_core_source_642/core/* clips_source/
 rm -rf clips_temp clips_642.zip
 ```
 
