@@ -1,5 +1,10 @@
 use clips_sys::clips;
-use std::{borrow::Cow, ffi::CString, fmt::Display, path::Path};
+use std::{
+    borrow::Cow,
+    ffi::{CStr, CString},
+    fmt::Display,
+    path::Path,
+};
 
 #[derive(Debug)]
 pub enum ClipsError {
@@ -58,9 +63,9 @@ impl Environment {
         let load_error = unsafe { clips::Load(self.raw, path_str.as_ptr() as *const i8) };
 
         match load_error {
-            x if x == clips::LoadError_LE_NO_ERROR => Ok(()),
-            x if x == clips::LoadError_LE_OPEN_FILE_ERROR as u32 => Err(ClipsError::LoadOpenFileError(path.to_str().unwrap().to_owned()).into()),
-            x if x == clips::LoadError_LE_PARSING_ERROR as u32 => Err(ClipsError::LoadParsingError(path.to_str().unwrap().to_owned()).into()),
+            clips::LoadError_LE_NO_ERROR => Ok(()),
+            clips::LoadError_LE_OPEN_FILE_ERROR => Err(ClipsError::LoadOpenFileError(path.to_str().unwrap().to_owned()).into()),
+            clips::LoadError_LE_PARSING_ERROR => Err(ClipsError::LoadParsingError(path.to_str().unwrap().to_owned()).into()),
             _ => unreachable!(),
         }
     }
@@ -78,6 +83,12 @@ impl Environment {
     }
 }
 
+impl Drop for Environment {
+    fn drop(&mut self) {
+        unsafe { clips::DestroyEnvironment(self.raw) };
+    }
+}
+
 #[derive(Debug)]
 pub struct FactBuilder {
     raw: *mut clips::FactBuilder,
@@ -89,6 +100,57 @@ impl FactBuilder {
         let raw = unsafe { clips::CreateFactBuilder(env.raw, template_name_cstr.as_ptr() as *const i8) };
         Self { raw }
     }
+
+    pub fn put_int(&mut self, slot_name: &str, value: i64) -> Result<(), ClipsError> {
+        let slot_name_cstr = CString::new(slot_name).unwrap();
+        let put_int_error = unsafe { clips::FBPutSlotInteger(self.raw, slot_name_cstr.as_ptr() as *const i8, value) };
+        match put_int_error {
+            clips::PutSlotError_PSE_NO_ERROR => Ok(()),
+            clips::PutSlotError_PSE_SLOT_NOT_FOUND_ERROR => Err(ClipsError::AddUDFInvalidArgumentTypeError(slot_name.to_owned()).into()),
+            clips::PutSlotError_PSE_TYPE_ERROR => Err(ClipsError::AddUDFInvalidArgumentTypeError(slot_name.to_owned()).into()),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn put_float(&mut self, slot_name: &str, value: f64) -> Result<(), ClipsError> {
+        let slot_name_cstr = CString::new(slot_name).unwrap();
+        let put_float_error = unsafe { clips::FBPutSlotFloat(self.raw, slot_name_cstr.as_ptr() as *const i8, value) };
+        match put_float_error {
+            clips::PutSlotError_PSE_NO_ERROR => Ok(()),
+            clips::PutSlotError_PSE_SLOT_NOT_FOUND_ERROR => Err(ClipsError::AddUDFInvalidArgumentTypeError(slot_name.to_owned()).into()),
+            clips::PutSlotError_PSE_TYPE_ERROR => Err(ClipsError::AddUDFInvalidArgumentTypeError(slot_name.to_owned()).into()),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn put_symbol(&mut self, slot_name: &str, value: &str) -> Result<(), ClipsError> {
+        let slot_name_cstr = CString::new(slot_name).unwrap();
+        let value_cstr = CString::new(value).unwrap();
+        let put_symbol_error = unsafe { clips::FBPutSlotSymbol(self.raw, slot_name_cstr.as_ptr() as *const i8, value_cstr.as_ptr() as *const i8) };
+        match put_symbol_error {
+            clips::PutSlotError_PSE_NO_ERROR => Ok(()),
+            clips::PutSlotError_PSE_SLOT_NOT_FOUND_ERROR => Err(ClipsError::AddUDFInvalidArgumentTypeError(slot_name.to_owned()).into()),
+            clips::PutSlotError_PSE_TYPE_ERROR => Err(ClipsError::AddUDFInvalidArgumentTypeError(slot_name.to_owned()).into()),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn put_string(&mut self, slot_name: &str, value: &str) -> Result<(), ClipsError> {
+        let slot_name_cstr = CString::new(slot_name).unwrap();
+        let value_cstr = CString::new(value).unwrap();
+        let put_string_error = unsafe { clips::FBPutSlotString(self.raw, slot_name_cstr.as_ptr() as *const i8, value_cstr.as_ptr() as *const i8) };
+        match put_string_error {
+            clips::PutSlotError_PSE_NO_ERROR => Ok(()),
+            clips::PutSlotError_PSE_SLOT_NOT_FOUND_ERROR => Err(ClipsError::AddUDFInvalidArgumentTypeError(slot_name.to_owned()).into()),
+            clips::PutSlotError_PSE_TYPE_ERROR => Err(ClipsError::AddUDFInvalidArgumentTypeError(slot_name.to_owned()).into()),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn assert(self) -> Fact {
+        let raw = unsafe { clips::FBAssert(self.raw) };
+        Fact::new(raw)
+    }
 }
 
 impl Drop for FactBuilder {
@@ -99,34 +161,68 @@ impl Drop for FactBuilder {
 
 #[derive(Debug)]
 pub struct Fact {
-    raw: *const clips::Fact,
+    raw: *mut clips::Fact,
 }
 
-#[derive(Debug)]
-pub struct Instance {
-    raw: *mut clips::Instance,
+impl Fact {
+    fn new(raw: *mut clips::Fact) -> Self {
+        Self { raw }
+    }
 }
 
-#[derive(Debug)]
-pub struct ExternalAddress;
+impl Drop for Fact {
+    fn drop(&mut self) {
+        unsafe { clips::Retract(self.raw) };
+    }
+}
 
 #[derive(Debug)]
 pub enum ClipsValue<'env> {
     Symbol(Cow<'env, str>),
-    Lexeme(Cow<'env, str>),
+    String(Cow<'env, str>),
     Float(f64),
     Integer(i64),
     Void(),
     Multifield(Vec<ClipsValue<'env>>),
-    Fact(Fact),
-    InstanceName(Cow<'env, str>),
-    Instance(Instance),
-    ExternalAddress(ExternalAddress),
 }
 
-impl Drop for Environment {
-    fn drop(&mut self) {
-        unsafe { clips::DestroyEnvironment(self.raw) };
+impl<'env> From<clips::clipsValue> for ClipsValue<'env> {
+    fn from(value: clips::clipsValue) -> Self {
+        match unsafe { (*value.__bindgen_anon_1.header).type_ as u32 } {
+            clips::SYMBOL_TYPE => {
+                let value = unsafe { CStr::from_ptr((*value.__bindgen_anon_1.lexemeValue).contents) }.to_string_lossy();
+                ClipsValue::Symbol(value)
+            }
+            clips::STRING_TYPE => {
+                let value = unsafe { CStr::from_ptr((*value.__bindgen_anon_1.lexemeValue).contents) }.to_string_lossy();
+                ClipsValue::String(value)
+            }
+            clips::FLOAT_TYPE => ClipsValue::Float(unsafe { (*value.__bindgen_anon_1.floatValue).contents }),
+            clips::INTEGER_TYPE => ClipsValue::Integer(unsafe { (*value.__bindgen_anon_1.integerValue).contents }),
+            clips::VOID_TYPE => ClipsValue::Void(),
+            clips::MULTIFIELD_TYPE => ClipsValue::Multifield((0..unsafe { (*value.__bindgen_anon_1.multifieldValue).length }).map(|index| unsafe { *(*value.__bindgen_anon_1.multifieldValue).contents.get_unchecked(index as usize) }.into()).collect::<Vec<_>>()),
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl<'env> From<clips::UDFValue> for ClipsValue<'env> {
+    fn from(value: clips::UDFValue) -> Self {
+        match unsafe { (*value.__bindgen_anon_1.header).type_ as u32 } {
+            clips::SYMBOL_TYPE => {
+                let value = unsafe { CStr::from_ptr((*value.__bindgen_anon_1.lexemeValue).contents) }.to_string_lossy();
+                ClipsValue::Symbol(value)
+            }
+            clips::STRING_TYPE => {
+                let value = unsafe { CStr::from_ptr((*value.__bindgen_anon_1.lexemeValue).contents) }.to_string_lossy();
+                ClipsValue::String(value)
+            }
+            clips::FLOAT_TYPE => ClipsValue::Float(unsafe { (*value.__bindgen_anon_1.floatValue).contents }),
+            clips::INTEGER_TYPE => ClipsValue::Integer(unsafe { (*value.__bindgen_anon_1.integerValue).contents }),
+            clips::VOID_TYPE => ClipsValue::Void(),
+            clips::MULTIFIELD_TYPE => ClipsValue::Multifield((0..unsafe { (*value.__bindgen_anon_1.multifieldValue).length }).map(|index| unsafe { *(*value.__bindgen_anon_1.multifieldValue).contents.get_unchecked(index as usize) }.into()).collect::<Vec<_>>()),
+            _ => unreachable!(),
+        }
     }
 }
 
@@ -152,5 +248,46 @@ mod tests {
         let mut env = Environment::new().unwrap();
         let result = env.load_from_str("(deftemplate test_deftemplate)");
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_load_from_string_error() {
+        let mut env = Environment::new().unwrap();
+        let result = env.load_from_str("(deftemplate test_deftemplate");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    #[ignore]
+    fn test_load_from_file() {
+        let mut env = Environment::new().unwrap();
+        let result = env.load(Path::new("test.clp"));
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_load_from_file_error() {
+        let mut env = Environment::new().unwrap();
+        let result = env.load(Path::new("non_existent_file.clp"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_run() {
+        let mut env = Environment::new().unwrap();
+        env.load_from_str("(deffacts test_facts (initial-fact))").unwrap();
+        let result = env.run(-1);
+        assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn test_fact_builder() {
+        let mut env = Environment::new().unwrap();
+        env.load_from_str("(deftemplate test_template (slot test_slot))").unwrap();
+        let mut fact_builder = env.fact_builder("test_template");
+        let put_result = fact_builder.put_symbol("test_slot", "test_value");
+        assert!(put_result.is_ok());
+        let fact = fact_builder.assert();
+        assert!(fact.raw.is_null() == false);
     }
 }
