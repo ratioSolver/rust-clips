@@ -1,6 +1,5 @@
 use clips_sys::clips;
 use std::{
-    borrow::Cow,
     ffi::{CStr, CString},
     fmt::Display,
     path::Path,
@@ -90,7 +89,7 @@ impl Environment {
         MultifieldBuilder::new(self, size)
     }
 
-    pub fn add_udf(&mut self, name: &str, return_types: Option<Type>, min_args: u16, max_args: u16, arg_types: Vec<Type>, function: &dyn FnMut(&mut Self, &mut UDFContext) -> ClipsValue<'static>) -> Result<(), ClipsError> {
+    pub fn add_udf(&mut self, name: &str, return_types: Option<Type>, min_args: u16, max_args: u16, arg_types: Vec<Type>, function: &dyn FnMut(&mut Self, &mut UDFContext) -> ClipsValue) -> Result<(), ClipsError> {
         let name_cstr = CString::new(name).unwrap();
         let return_types_mask = return_types.map_or("v".to_string(), |t| Type::format(&t));
         unimplemented!()
@@ -287,7 +286,7 @@ impl UDFContext {
         Self { raw }
     }
 
-    pub fn get_next_argument(&'_ self, expected_type: Type) -> Option<ClipsValue<'_>> {
+    pub fn get_next_argument(&self, expected_type: Type) -> Option<ClipsValue> {
         let mut arg = std::mem::MaybeUninit::<clips::UDFValue>::uninit();
         if unsafe { clips::UDFNextArgument(self.raw, expected_type.0, arg.as_mut_ptr()) } { Some(unsafe { arg.assume_init().into() }) } else { None }
     }
@@ -298,24 +297,24 @@ impl UDFContext {
 }
 
 #[derive(Debug)]
-pub enum ClipsValue<'env> {
-    Symbol(Cow<'env, str>),
-    String(Cow<'env, str>),
+pub enum ClipsValue {
+    Symbol(String),
+    String(String),
     Float(f64),
     Integer(i64),
     Void(),
-    Multifield(Vec<ClipsValue<'env>>),
+    Multifield(Vec<ClipsValue>),
 }
 
-impl<'env> From<clips::clipsValue> for ClipsValue<'env> {
+impl From<clips::clipsValue> for ClipsValue {
     fn from(value: clips::clipsValue) -> Self {
         match unsafe { (*value.__bindgen_anon_1.header).type_ as u32 } {
             clips::SYMBOL_TYPE => {
-                let value = unsafe { CStr::from_ptr((*value.__bindgen_anon_1.lexemeValue).contents) }.to_string_lossy();
+                let value = unsafe { CStr::from_ptr((*value.__bindgen_anon_1.lexemeValue).contents) }.to_string_lossy().into_owned();
                 ClipsValue::Symbol(value)
             }
             clips::STRING_TYPE => {
-                let value = unsafe { CStr::from_ptr((*value.__bindgen_anon_1.lexemeValue).contents) }.to_string_lossy();
+                let value = unsafe { CStr::from_ptr((*value.__bindgen_anon_1.lexemeValue).contents) }.to_string_lossy().into_owned();
                 ClipsValue::String(value)
             }
             clips::FLOAT_TYPE => ClipsValue::Float(unsafe { (*value.__bindgen_anon_1.floatValue).contents }),
@@ -327,15 +326,15 @@ impl<'env> From<clips::clipsValue> for ClipsValue<'env> {
     }
 }
 
-impl<'env> From<clips::UDFValue> for ClipsValue<'env> {
+impl From<clips::UDFValue> for ClipsValue {
     fn from(value: clips::UDFValue) -> Self {
         match unsafe { (*value.__bindgen_anon_1.header).type_ as u32 } {
             clips::SYMBOL_TYPE => {
-                let value = unsafe { CStr::from_ptr((*value.__bindgen_anon_1.lexemeValue).contents) }.to_string_lossy();
+                let value = unsafe { CStr::from_ptr((*value.__bindgen_anon_1.lexemeValue).contents) }.to_string_lossy().into_owned();
                 ClipsValue::Symbol(value)
             }
             clips::STRING_TYPE => {
-                let value = unsafe { CStr::from_ptr((*value.__bindgen_anon_1.lexemeValue).contents) }.to_string_lossy();
+                let value = unsafe { CStr::from_ptr((*value.__bindgen_anon_1.lexemeValue).contents) }.to_string_lossy().into_owned();
                 ClipsValue::String(value)
             }
             clips::FLOAT_TYPE => ClipsValue::Float(unsafe { (*value.__bindgen_anon_1.floatValue).contents }),
