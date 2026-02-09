@@ -32,9 +32,7 @@ fn main() {
         .generate()
         .expect("Unable to generate bindings");
 
-    bindings
-        .write_to_file(out_path.join("bindings.rs"))
-        .expect("Couldn't write bindings!");
+    bindings.write_to_file(out_path.join("bindings.rs")).expect("Couldn't write bindings!");
 
     // Tell Cargo to rerun if the C files change
     println!("cargo:rerun-if-changed=clips_source/");
