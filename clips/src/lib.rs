@@ -15,6 +15,8 @@ pub enum ClipsError {
     BatchStarError(String),
     LoadOpenFileError(String),
     LoadParsingError(String),
+    PutSlotSlotNotFoundError(String),
+    PutSlotTypeError(String),
     AddUDFMinExceedsMaxError(String),
     AddUDFFunctionNameInUseError(String),
     AddUDFInvalidArgumentTypeError(String),
@@ -31,6 +33,8 @@ impl Display for ClipsError {
             ClipsError::BatchStarError(s) => write!(f, "Batch* error: {s}"),
             ClipsError::LoadOpenFileError(s) => write!(f, "Failed to open file: {s}"),
             ClipsError::LoadParsingError(s) => write!(f, "Failed to parse file: {s}"),
+            ClipsError::PutSlotSlotNotFoundError(s) => write!(f, "Slot not found: {s}"),
+            ClipsError::PutSlotTypeError(s) => write!(f, "Type error for slot: {s}"),
             ClipsError::AddUDFMinExceedsMaxError(s) => write!(f, "Minimum number of arguments exceeds maximum for UDF '{s}'"),
             ClipsError::AddUDFFunctionNameInUseError(s) => write!(f, "Function name '{s}' is already in use for UDF"),
             ClipsError::AddUDFInvalidArgumentTypeError(s) => write!(f, "Invalid argument type for UDF '{s}'"),
@@ -166,8 +170,8 @@ impl FactBuilder {
         let put_int_error = unsafe { clips::FBPutSlotInteger(self.raw, slot_name_cstr.as_ptr() as *const i8, value) };
         match put_int_error {
             clips::PutSlotError_PSE_NO_ERROR => Ok(()),
-            clips::PutSlotError_PSE_SLOT_NOT_FOUND_ERROR => Err(ClipsError::AddUDFInvalidArgumentTypeError(slot_name.to_owned()).into()),
-            clips::PutSlotError_PSE_TYPE_ERROR => Err(ClipsError::AddUDFInvalidArgumentTypeError(slot_name.to_owned()).into()),
+            clips::PutSlotError_PSE_SLOT_NOT_FOUND_ERROR => Err(ClipsError::PutSlotSlotNotFoundError(slot_name.to_owned()).into()),
+            clips::PutSlotError_PSE_TYPE_ERROR => Err(ClipsError::PutSlotTypeError(slot_name.to_owned()).into()),
             _ => unreachable!(),
         }
     }
@@ -177,8 +181,8 @@ impl FactBuilder {
         let put_float_error = unsafe { clips::FBPutSlotFloat(self.raw, slot_name_cstr.as_ptr() as *const i8, value) };
         match put_float_error {
             clips::PutSlotError_PSE_NO_ERROR => Ok(()),
-            clips::PutSlotError_PSE_SLOT_NOT_FOUND_ERROR => Err(ClipsError::AddUDFInvalidArgumentTypeError(slot_name.to_owned()).into()),
-            clips::PutSlotError_PSE_TYPE_ERROR => Err(ClipsError::AddUDFInvalidArgumentTypeError(slot_name.to_owned()).into()),
+            clips::PutSlotError_PSE_SLOT_NOT_FOUND_ERROR => Err(ClipsError::PutSlotSlotNotFoundError(slot_name.to_owned()).into()),
+            clips::PutSlotError_PSE_TYPE_ERROR => Err(ClipsError::PutSlotTypeError(slot_name.to_owned()).into()),
             _ => unreachable!(),
         }
     }
@@ -189,8 +193,8 @@ impl FactBuilder {
         let put_symbol_error = unsafe { clips::FBPutSlotSymbol(self.raw, slot_name_cstr.as_ptr() as *const i8, value_cstr.as_ptr() as *const i8) };
         match put_symbol_error {
             clips::PutSlotError_PSE_NO_ERROR => Ok(()),
-            clips::PutSlotError_PSE_SLOT_NOT_FOUND_ERROR => Err(ClipsError::AddUDFInvalidArgumentTypeError(slot_name.to_owned()).into()),
-            clips::PutSlotError_PSE_TYPE_ERROR => Err(ClipsError::AddUDFInvalidArgumentTypeError(slot_name.to_owned()).into()),
+            clips::PutSlotError_PSE_SLOT_NOT_FOUND_ERROR => Err(ClipsError::PutSlotSlotNotFoundError(slot_name.to_owned()).into()),
+            clips::PutSlotError_PSE_TYPE_ERROR => Err(ClipsError::PutSlotTypeError(slot_name.to_owned()).into()),
             _ => unreachable!(),
         }
     }
@@ -201,8 +205,8 @@ impl FactBuilder {
         let put_string_error = unsafe { clips::FBPutSlotString(self.raw, slot_name_cstr.as_ptr() as *const i8, value_cstr.as_ptr() as *const i8) };
         match put_string_error {
             clips::PutSlotError_PSE_NO_ERROR => Ok(()),
-            clips::PutSlotError_PSE_SLOT_NOT_FOUND_ERROR => Err(ClipsError::AddUDFInvalidArgumentTypeError(slot_name.to_owned()).into()),
-            clips::PutSlotError_PSE_TYPE_ERROR => Err(ClipsError::AddUDFInvalidArgumentTypeError(slot_name.to_owned()).into()),
+            clips::PutSlotError_PSE_SLOT_NOT_FOUND_ERROR => Err(ClipsError::PutSlotSlotNotFoundError(slot_name.to_owned()).into()),
+            clips::PutSlotError_PSE_TYPE_ERROR => Err(ClipsError::PutSlotTypeError(slot_name.to_owned()).into()),
             _ => unreachable!(),
         }
     }
@@ -212,8 +216,8 @@ impl FactBuilder {
         let put_multifield_error = unsafe { clips::FBPutSlotMultifield(self.raw, slot_name_cstr.as_ptr() as *const i8, value.raw) };
         match put_multifield_error {
             clips::PutSlotError_PSE_NO_ERROR => Ok(()),
-            clips::PutSlotError_PSE_SLOT_NOT_FOUND_ERROR => Err(ClipsError::AddUDFInvalidArgumentTypeError(slot_name.to_owned()).into()),
-            clips::PutSlotError_PSE_TYPE_ERROR => Err(ClipsError::AddUDFInvalidArgumentTypeError(slot_name.to_owned()).into()),
+            clips::PutSlotError_PSE_SLOT_NOT_FOUND_ERROR => Err(ClipsError::PutSlotSlotNotFoundError(slot_name.to_owned()).into()),
+            clips::PutSlotError_PSE_TYPE_ERROR => Err(ClipsError::PutSlotTypeError(slot_name.to_owned()).into()),
             _ => unreachable!(),
         }
     }
