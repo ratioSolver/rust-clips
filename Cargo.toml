@@ -1,0 +1,2 @@
+[workspace]
+members = ["clips-sys", "clips"]
