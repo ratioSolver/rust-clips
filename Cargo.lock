@@ -76,6 +76,9 @@ dependencies = [
 [[package]]
 name = "clips"
 version = "0.1.0"
+dependencies = [
+ "clips-sys",
+]
 
 [[package]]
 name = "clips-sys"
