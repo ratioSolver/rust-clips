@@ -89,6 +89,12 @@ impl Environment {
     pub fn multifield_builder(&self, size: usize) -> MultifieldBuilder {
         MultifieldBuilder::new(self, size)
     }
+
+    pub fn add_udf(&mut self, name: &str, return_types: Option<Type>, min_args: u16, max_args: u16, arg_types: Vec<Type>, function: &dyn FnMut(&mut Self, &mut UDFContext) -> ClipsValue<'static>) -> Result<(), ClipsError> {
+        let name_cstr = CString::new(name).unwrap();
+        let return_types_mask = return_types.map_or("v".to_string(), |t| Type::format(&t));
+        unimplemented!()
+    }
 }
 
 impl Drop for Environment {
@@ -248,6 +254,46 @@ impl Fact {
 impl Drop for Fact {
     fn drop(&mut self) {
         unsafe { clips::Retract(self.raw) };
+    }
+}
+
+pub struct Type(pub u32);
+const CODES: &[(u32, char)] = &[(clips::CLIPSType_BOOLEAN_BIT, 'b'), (clips::CLIPSType_INTEGER_BIT, 'l'), (clips::CLIPSType_FLOAT_BIT, 'd'), (clips::CLIPSType_STRING_BIT, 's'), (clips::CLIPSType_SYMBOL_BIT, 'y'), (clips::CLIPSType_VOID_BIT, 'v'), (clips::CLIPSType_MULTIFIELD_BIT, 'm')];
+
+impl Type {
+    pub const BOOLEAN: u32 = clips::CLIPSType_BOOLEAN_BIT;
+    pub const SYMBOL: u32 = clips::CLIPSType_SYMBOL_BIT;
+    pub const STRING: u32 = clips::CLIPSType_STRING_BIT;
+    pub const FLOAT: u32 = clips::CLIPSType_FLOAT_BIT;
+    pub const INTEGER: u32 = clips::CLIPSType_INTEGER_BIT;
+    pub const VOID: u32 = clips::CLIPSType_VOID_BIT;
+    pub const MULTIFIELD: u32 = clips::CLIPSType_MULTIFIELD_BIT;
+
+    fn format(mask: &Type) -> String {
+        if mask.0 == 0 {
+            return "*".to_string();
+        }
+        CODES.iter().filter(|(bit, _)| (mask.0 & *bit) != 0).map(|(_, code)| *code).collect()
+    }
+}
+
+#[derive(Debug)]
+pub struct UDFContext {
+    raw: *mut clips::UDFContext,
+}
+
+impl UDFContext {
+    fn new(raw: *mut clips::UDFContext) -> Self {
+        Self { raw }
+    }
+
+    pub fn get_next_argument(&'_ self, expected_type: Type) -> Option<ClipsValue<'_>> {
+        let mut arg = std::mem::MaybeUninit::<clips::UDFValue>::uninit();
+        if unsafe { clips::UDFNextArgument(self.raw, expected_type.0, arg.as_mut_ptr()) } { Some(unsafe { arg.assume_init().into() }) } else { None }
+    }
+
+    pub fn has_next_argument(&self) -> bool {
+        unsafe { !(*self.raw).lastArg.is_null() }
     }
 }
 
