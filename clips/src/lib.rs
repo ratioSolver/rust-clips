@@ -50,15 +50,15 @@ impl Environment {
         if raw.is_null() { Err(ClipsError::CreateEnvironmentError) } else { Ok(Self { raw }) }
     }
 
-    pub fn clear(&mut self) -> Result<(), ClipsError> {
+    pub fn clear(&self) -> Result<(), ClipsError> {
         if unsafe { clips::Clear(self.raw) } { Ok(()) } else { Err(ClipsError::ClearError) }
     }
 
-    pub fn load_from_str(&mut self, string: &str) -> Result<(), ClipsError> {
+    pub fn load_from_str(&self, string: &str) -> Result<(), ClipsError> {
         if unsafe { clips::LoadFromString(self.raw, string.as_ptr() as *const i8, string.len()) } { Ok(()) } else { Err(ClipsError::LoadFromStringError(string.to_owned()).into()) }
     }
 
-    pub fn load(&mut self, path: &Path) -> Result<(), ClipsError> {
+    pub fn load(&self, path: &Path) -> Result<(), ClipsError> {
         let path_str = CString::new(path.to_str().unwrap()).unwrap();
         let load_error = unsafe { clips::Load(self.raw, path_str.as_ptr() as *const i8) };
 
@@ -70,22 +70,82 @@ impl Environment {
         }
     }
 
-    pub fn reset(&mut self) {
+    pub fn reset(&self) {
         unsafe { clips::Reset(self.raw) };
     }
 
-    pub fn run(&mut self, limit: i64) -> i64 {
+    pub fn run(&self, limit: i64) -> i64 {
         unsafe { clips::Run(self.raw, limit) }
     }
 
     pub fn fact_builder(&self, template_name: &str) -> FactBuilder {
         FactBuilder::new(self, template_name)
     }
+
+    pub fn multifield_builder(&self, size: usize) -> MultifieldBuilder {
+        MultifieldBuilder::new(self, size)
+    }
 }
 
 impl Drop for Environment {
     fn drop(&mut self) {
         unsafe { clips::DestroyEnvironment(self.raw) };
+    }
+}
+
+#[derive(Debug)]
+pub struct Multifield {
+    raw: *mut clips::Multifield,
+}
+
+impl Multifield {
+    fn new(raw: *mut clips::Multifield) -> Self {
+        Self { raw }
+    }
+}
+
+#[derive(Debug)]
+pub struct MultifieldBuilder {
+    raw: *mut clips::MultifieldBuilder,
+}
+
+impl MultifieldBuilder {
+    fn new(env: &Environment, size: usize) -> Self {
+        let raw = unsafe { clips::CreateMultifieldBuilder(env.raw, size) };
+        Self { raw }
+    }
+
+    pub fn put_int(&mut self, value: i64) {
+        unsafe { clips::MBAppendInteger(self.raw, value) };
+    }
+
+    pub fn put_float(&mut self, value: f64) {
+        unsafe { clips::MBAppendFloat(self.raw, value) };
+    }
+
+    pub fn put_symbol(&mut self, value: &str) {
+        let value_cstr = CString::new(value).unwrap();
+        unsafe { clips::MBAppendSymbol(self.raw, value_cstr.as_ptr() as *const i8) };
+    }
+
+    pub fn put_string(&mut self, value: &str) {
+        let value_cstr = CString::new(value).unwrap();
+        unsafe { clips::MBAppendString(self.raw, value_cstr.as_ptr() as *const i8) };
+    }
+
+    pub fn put_multifield(&mut self, value: Multifield) {
+        unsafe { clips::MBAppendMultifield(self.raw, value.raw) };
+    }
+
+    pub fn create(self) -> Multifield {
+        let raw = unsafe { clips::MBCreate(self.raw) };
+        Multifield::new(raw)
+    }
+}
+
+impl Drop for MultifieldBuilder {
+    fn drop(&mut self) {
+        unsafe { clips::MBDispose(self.raw) };
     }
 }
 
@@ -140,6 +200,17 @@ impl FactBuilder {
         let value_cstr = CString::new(value).unwrap();
         let put_string_error = unsafe { clips::FBPutSlotString(self.raw, slot_name_cstr.as_ptr() as *const i8, value_cstr.as_ptr() as *const i8) };
         match put_string_error {
+            clips::PutSlotError_PSE_NO_ERROR => Ok(()),
+            clips::PutSlotError_PSE_SLOT_NOT_FOUND_ERROR => Err(ClipsError::AddUDFInvalidArgumentTypeError(slot_name.to_owned()).into()),
+            clips::PutSlotError_PSE_TYPE_ERROR => Err(ClipsError::AddUDFInvalidArgumentTypeError(slot_name.to_owned()).into()),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn put_multifield(&mut self, slot_name: &str, value: Multifield) -> Result<(), ClipsError> {
+        let slot_name_cstr = CString::new(slot_name).unwrap();
+        let put_multifield_error = unsafe { clips::FBPutSlotMultifield(self.raw, slot_name_cstr.as_ptr() as *const i8, value.raw) };
+        match put_multifield_error {
             clips::PutSlotError_PSE_NO_ERROR => Ok(()),
             clips::PutSlotError_PSE_SLOT_NOT_FOUND_ERROR => Err(ClipsError::AddUDFInvalidArgumentTypeError(slot_name.to_owned()).into()),
             clips::PutSlotError_PSE_TYPE_ERROR => Err(ClipsError::AddUDFInvalidArgumentTypeError(slot_name.to_owned()).into()),
@@ -238,21 +309,21 @@ mod tests {
 
     #[test]
     fn test_environment_clear() {
-        let mut env = Environment::new().unwrap();
+        let env = Environment::new().unwrap();
         let result = env.clear();
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_load_from_string() {
-        let mut env = Environment::new().unwrap();
+        let env = Environment::new().unwrap();
         let result = env.load_from_str("(deftemplate test_deftemplate)");
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_load_from_string_error() {
-        let mut env = Environment::new().unwrap();
+        let env = Environment::new().unwrap();
         let result = env.load_from_str("(deftemplate test_deftemplate");
         assert!(result.is_err());
     }
@@ -260,21 +331,21 @@ mod tests {
     #[test]
     #[ignore]
     fn test_load_from_file() {
-        let mut env = Environment::new().unwrap();
+        let env = Environment::new().unwrap();
         let result = env.load(Path::new("test.clp"));
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_load_from_file_error() {
-        let mut env = Environment::new().unwrap();
+        let env = Environment::new().unwrap();
         let result = env.load(Path::new("non_existent_file.clp"));
         assert!(result.is_err());
     }
 
     #[test]
     fn test_run() {
-        let mut env = Environment::new().unwrap();
+        let env = Environment::new().unwrap();
         env.load_from_str("(deffacts test_facts (initial-fact))").unwrap();
         let result = env.run(-1);
         assert_eq!(result, 0);
@@ -282,12 +353,23 @@ mod tests {
 
     #[test]
     fn test_fact_builder() {
-        let mut env = Environment::new().unwrap();
+        let env = Environment::new().unwrap();
         env.load_from_str("(deftemplate test_template (slot test_slot))").unwrap();
         let mut fact_builder = env.fact_builder("test_template");
         let put_result = fact_builder.put_symbol("test_slot", "test_value");
         assert!(put_result.is_ok());
         let fact = fact_builder.assert();
         assert!(fact.raw.is_null() == false);
+    }
+
+    #[test]
+    fn test_multifield_builder() {
+        let env = Environment::new().unwrap();
+        let mut multifield_builder = env.multifield_builder(3);
+        multifield_builder.put_int(42);
+        multifield_builder.put_float(3.14);
+        multifield_builder.put_symbol("test_symbol");
+        let multifield = multifield_builder.create();
+        assert!(multifield.raw.is_null() == false);
     }
 }
