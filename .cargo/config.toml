@@ -1,0 +1,2 @@
+[env]
+CLIPS_SOURCE_DIR = { value = "clips_source", relative = true }
