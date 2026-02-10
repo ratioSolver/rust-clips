@@ -89,10 +89,26 @@ impl Environment {
         MultifieldBuilder::new(self, size)
     }
 
-    pub fn add_udf(&mut self, name: &str, return_types: Option<Type>, min_args: u16, max_args: u16, arg_types: Vec<Type>, function: &dyn FnMut(&mut Self, &mut UDFContext) -> ClipsValue) -> Result<(), ClipsError> {
+    pub fn add_udf<F>(&mut self, name: &str, return_types: Option<Type>, min_args: u16, max_args: u16, arg_types: Vec<Type>, function: F) -> Result<(), ClipsError>
+    where
+        F: FnMut(&mut Self, &mut UDFContext) -> ClipsValue + 'static,
+    {
         let name_cstr = CString::new(name).unwrap();
-        let return_types_mask = return_types.map_or("v".to_string(), |t| Type::format(&t));
-        unimplemented!()
+        let return_types_cstr = CString::new(return_types.map_or("v".to_string(), |t| Type::format(&t))).unwrap();
+        let arg_types_cstr = CString::new(if arg_types.is_empty() { "*".to_string() } else { arg_types.iter().map(|t| Type::format(t)).collect::<Vec<_>>().join(";") }).unwrap();
+
+        let boxed_f: Box<dyn FnMut(&mut Self, &mut UDFContext) -> ClipsValue> = Box::new(function);
+        let user_data = Box::into_raw(Box::new(boxed_f)) as *mut std::ffi::c_void;
+
+        let err = unsafe { clips::AddUDF(self.raw, name_cstr.as_ptr(), return_types_cstr.as_ptr(), min_args, max_args, arg_types_cstr.as_ptr(), Some(trampoline), name_cstr.as_ptr(), user_data) };
+        match err {
+            clips::AddUDFError_AUE_NO_ERROR => Ok(()),
+            clips::AddUDFError_AUE_MIN_EXCEEDS_MAX_ERROR => Err(ClipsError::AddUDFMinExceedsMaxError(name.to_owned())),
+            clips::AddUDFError_AUE_FUNCTION_NAME_IN_USE_ERROR => Err(ClipsError::AddUDFFunctionNameInUseError(name.to_owned())),
+            clips::AddUDFError_AUE_INVALID_ARGUMENT_TYPE_ERROR => Err(ClipsError::AddUDFInvalidArgumentTypeError(name.to_owned())),
+            clips::AddUDFError_AUE_INVALID_RETURN_TYPE_ERROR => Err(ClipsError::AddUDFInvalidReturnTypeError(name.to_owned())),
+            _ => unreachable!(),
+        }
     }
 }
 
@@ -110,6 +126,10 @@ pub struct Multifield {
 impl Multifield {
     fn new(raw: *mut clips::Multifield) -> Self {
         Self { raw }
+    }
+
+    pub fn len(&self) -> usize {
+        unsafe { (*self.raw).length as usize }
     }
 }
 
@@ -346,6 +366,47 @@ impl From<clips::UDFValue> for ClipsValue {
     }
 }
 
+unsafe extern "C" fn trampoline(env: *mut clips::Environment, context: *mut clips::UDFContext, return_value: *mut clips::UDFValue) {
+    let closure = unsafe { &mut *(context.as_ref().unwrap().context as *mut Box<dyn FnMut(&mut Environment, &mut UDFContext) -> ClipsValue>) };
+    let mut safe_env = std::mem::ManuallyDrop::new(Environment { raw: env });
+    let mut safe_context = UDFContext::new(context);
+    let ret = closure(&mut safe_env, &mut safe_context);
+    unsafe {
+        match ret {
+            ClipsValue::Void() => {}
+            ClipsValue::Symbol(s) => {
+                let s_cstr = CString::new(s).unwrap();
+                (*return_value).__bindgen_anon_1.lexemeValue = clips::CreateSymbol(env, s_cstr.as_ptr());
+            }
+            ClipsValue::String(s) => {
+                let s_cstr = CString::new(s).unwrap();
+                (*return_value).__bindgen_anon_1.lexemeValue = clips::CreateString(env, s_cstr.as_ptr());
+            }
+            ClipsValue::Float(f) => {
+                (*return_value).__bindgen_anon_1.floatValue = clips::CreateFloat(env, f);
+            }
+            ClipsValue::Integer(i) => {
+                (*return_value).__bindgen_anon_1.integerValue = clips::CreateInteger(env, i);
+            }
+            ClipsValue::Multifield(vals) => {
+                let mut mb = safe_env.multifield_builder(vals.len());
+                for v in vals {
+                    match v {
+                        ClipsValue::Integer(i) => mb.put_int(i),
+                        ClipsValue::Float(f) => mb.put_float(f),
+                        ClipsValue::Symbol(s) => mb.put_symbol(&s),
+                        ClipsValue::String(s) => mb.put_string(&s),
+                        _ => {}
+                    }
+                }
+                let mf = mb.create();
+                (*return_value).__bindgen_anon_1.multifieldValue = mf.raw;
+                std::mem::forget(mf);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -420,5 +481,46 @@ mod tests {
         multifield_builder.put_symbol("test_symbol");
         let multifield = multifield_builder.create();
         assert!(multifield.raw.is_null() == false);
+    }
+
+    #[test]
+    fn test_add_udf() {
+        let mut env = Environment::new().unwrap();
+        let called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let called_clone = called.clone();
+
+        env.add_udf("test_udf", Some(Type(Type::VOID)), 0, 0, vec![], move |_env, _ctx| {
+            called_clone.store(true, std::sync::atomic::Ordering::SeqCst);
+            ClipsValue::Void()
+        })
+        .unwrap();
+
+        env.load_from_str("(defrule test_rule => (test_udf))").unwrap();
+        env.reset();
+        env.run(-1);
+
+        assert!(called.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_add_udf_with_args() {
+        let mut env = Environment::new().unwrap();
+        let value = std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0));
+        let value_clone = value.clone();
+
+        env.add_udf("test_udf_args", Some(Type(Type::VOID)), 1, 1, vec![Type(Type::INTEGER)], move |_env, ctx| {
+            let arg = ctx.get_next_argument(Type(Type::INTEGER)).unwrap();
+            if let ClipsValue::Integer(i) = arg {
+                value_clone.store(i, std::sync::atomic::Ordering::SeqCst);
+            }
+            ClipsValue::Void()
+        })
+        .unwrap();
+
+        env.load_from_str("(defrule test_rule_args => (test_udf_args 42))").unwrap();
+        env.reset();
+        env.run(-1);
+
+        assert_eq!(value.load(std::sync::atomic::Ordering::SeqCst), 42);
     }
 }
