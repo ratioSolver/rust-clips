@@ -20,10 +20,14 @@ pub enum ClipsError {
     LoadOpenFileError(String),
     /// Failed to parse a file or string during load (contains the source).
     LoadParsingError(String),
+    /// Deftemplate not found when creating a fact builder (contains the template name).
+    DeftemplateNotFoundError(String),
     /// A slot was not found in a fact template (contains the slot name).
     PutSlotSlotNotFoundError(String),
     /// Type mismatch when setting a slot value (contains the slot name).
     PutSlotTypeError(String),
+    /// Failed to create a multifield builder.
+    MultifieldBuilderError(String),
     /// Minimum number of arguments exceeds maximum for a UDF (contains the function name).
     AddUDFMinExceedsMaxError(String),
     /// Function name is already in use (contains the function name).
@@ -43,8 +47,10 @@ impl Display for ClipsError {
             ClipsError::BiildParsingError(s) => write!(f, "Failed to build construct: {s}"),
             ClipsError::LoadOpenFileError(s) => write!(f, "Failed to open file: {s}"),
             ClipsError::LoadParsingError(s) => write!(f, "Failed to parse file: {s}"),
+            ClipsError::DeftemplateNotFoundError(s) => write!(f, "Deftemplate not found: {s}"),
             ClipsError::PutSlotSlotNotFoundError(s) => write!(f, "Slot not found: {s}"),
             ClipsError::PutSlotTypeError(s) => write!(f, "Type error for slot: {s}"),
+            ClipsError::MultifieldBuilderError(s) => write!(f, "Failed to create multifield builder: {s}"),
             ClipsError::AddUDFMinExceedsMaxError(s) => write!(f, "Minimum number of arguments exceeds maximum for UDF '{s}'"),
             ClipsError::AddUDFFunctionNameInUseError(s) => write!(f, "Function name '{s}' is already in use for UDF"),
             ClipsError::AddUDFInvalidArgumentTypeError(s) => write!(f, "Invalid argument type for UDF '{s}'"),
@@ -183,12 +189,14 @@ impl Environment {
     /// # use clips::Environment;
     /// # let mut env = Environment::new().unwrap();
     /// # env.load_from_str("(deftemplate person (slot name) (slot age))").unwrap();
-    /// let fact = env.fact_builder("person")
+    /// let fact = env.fact_builder("person").unwrap()
     ///     .put_symbol("name", "John").unwrap()
     ///     .put_int("age", 30).unwrap();
     /// ```
-    pub fn fact_builder(&self, template_name: &str) -> FactBuilder {
-        FactBuilder::new(self, template_name)
+    pub fn fact_builder(&self, template_name: &str) -> Result<FactBuilder, ClipsError> {
+        let template_name_cstr = CString::new(template_name).unwrap();
+        let raw = unsafe { clips::CreateFactBuilder(self.raw, template_name_cstr.as_ptr() as *const i8) };
+        if raw.is_null() { Err(ClipsError::DeftemplateNotFoundError(template_name.to_owned()).into()) } else { Ok(FactBuilder::new(raw)) }
     }
 
     /// Creates a multifield builder.
@@ -200,8 +208,9 @@ impl Environment {
     /// # Returns
     ///
     /// A builder that can be used to populate multiple values.
-    pub fn multifield_builder(&self, size: usize) -> MultifieldBuilder {
-        MultifieldBuilder::new(self, size)
+    pub fn multifield_builder(&self, size: usize) -> Result<MultifieldBuilder, ClipsError> {
+        let raw = unsafe { clips::CreateMultifieldBuilder(self.raw, size) };
+        if raw.is_null() { Err(ClipsError::MultifieldBuilderError(format!("Failed to create multifield builder with size {size}")).into()) } else { Ok(MultifieldBuilder::new(raw)) }
     }
 
     /// Asserts a fact built with `fact_builder`.
@@ -311,8 +320,7 @@ pub struct MultifieldBuilder {
 }
 
 impl MultifieldBuilder {
-    fn new(env: &Environment, size: usize) -> Self {
-        let raw = unsafe { clips::CreateMultifieldBuilder(env.raw, size) };
+    fn new(raw: *mut clips::MultifieldBuilder) -> Self {
         Self { raw }
     }
 
@@ -372,9 +380,7 @@ pub struct FactBuilder {
 }
 
 impl FactBuilder {
-    fn new(env: &Environment, template_name: &str) -> Self {
-        let template_name_cstr = CString::new(template_name).unwrap();
-        let raw = unsafe { clips::CreateFactBuilder(env.raw, template_name_cstr.as_ptr() as *const i8) };
+    fn new(raw: *mut clips::FactBuilder) -> Self {
         Self { raw }
     }
 
@@ -635,7 +641,7 @@ unsafe extern "C" fn trampoline(env: *mut clips::Environment, context: *mut clip
                 (*return_value).__bindgen_anon_1.integerValue = clips::CreateInteger(env, i);
             }
             ClipsValue::Multifield(vals) => {
-                let mb = safe_env.multifield_builder(vals.len());
+                let mb = safe_env.multifield_builder(vals.len()).unwrap();
                 let mb = vals.iter().fold(mb, |mb, v| {
                     match v {
                         ClipsValue::Integer(i) => mb.put_int(*i),
@@ -711,7 +717,7 @@ mod tests {
     fn test_fact_builder() {
         let mut env = Environment::new().unwrap();
         env.load_from_str("(deftemplate test_template (slot test_slot))").unwrap();
-        let fact_builder = env.fact_builder("test_template").put_symbol("test_slot", "test_value").unwrap();
+        let fact_builder = env.fact_builder("test_template").unwrap().put_symbol("test_slot", "test_value").unwrap();
         let fact = env.assert_fact(fact_builder);
         assert!(fact.is_some());
     }
@@ -719,7 +725,7 @@ mod tests {
     #[test]
     fn test_multifield_builder() {
         let env = Environment::new().unwrap();
-        let multifield = env.multifield_builder(3).put_int(42).put_float(3.14).put_symbol("test_symbol").create();
+        let multifield = env.multifield_builder(3).unwrap().put_int(42).put_float(3.14).put_symbol("test_symbol").create();
         assert!(multifield.raw.is_null() == false);
     }
 
