@@ -255,9 +255,9 @@ impl FactBuilder {
         }
     }
 
-    pub fn assert(self) -> Fact {
+    pub fn assert(self) -> Option<Fact> {
         let raw = unsafe { clips::FBAssert(self.raw) };
-        Fact::new(raw)
+        if raw.is_null() { None } else { Some(Fact::new(raw)) }
     }
 }
 
@@ -477,7 +477,7 @@ mod tests {
         let put_result = fact_builder.put_symbol("test_slot", "test_value");
         assert!(put_result.is_ok());
         let fact = fact_builder.assert();
-        assert!(fact.raw.is_null() == false);
+        assert!(fact.is_some());
     }
 
     #[test]
@@ -493,7 +493,7 @@ mod tests {
 
     #[test]
     fn test_add_udf() {
-        let mut env = Environment::new().unwrap();
+        let env = Environment::new().unwrap();
         let called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let called_clone = called.clone();
 
@@ -512,7 +512,7 @@ mod tests {
 
     #[test]
     fn test_add_udf_with_args() {
-        let mut env = Environment::new().unwrap();
+        let env = Environment::new().unwrap();
         let value = std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0));
         let value_clone = value.clone();
 
