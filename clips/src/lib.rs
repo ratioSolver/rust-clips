@@ -1,3 +1,234 @@
+//! # CLIPS - A Safe Rust Wrapper for the CLIPS Expert System
+//!
+//! This crate provides a safe, idiomatic Rust interface to the [CLIPS](https://clipsrules.net)
+//! inference engine. CLIPS (C Language Integrated Production System) is a tool for building
+//! expert systems and knowledge-based applications using rule-based reasoning.
+//!
+//! ## Overview
+//!
+//! CLIPS is a powerful expert system shell that allows you to:
+//! - Define facts and rules using a Lisp-like syntax
+//! - Build dynamic knowledge bases
+//! - Execute inference engines to draw conclusions
+//! - Integrate rule-based reasoning into Rust applications
+//!
+//! This crate wraps the low-level C API (`clips-sys`) with safe abstractions that handle
+//! memory management, string conversions, and error handling automatically.
+//!
+//! ## Core Components
+//!
+//! - [`Environment`] - The main interface to a CLIPS inference engine instance
+//! - [`FactBuilder`] - Constructs facts (database records) following the builder pattern
+//! - [`Fact`] - Represents an asserted fact in the knowledge base
+//! - [`MultifieldBuilder`] - Builds ordered collections of values
+//! - [`Multifield`] - Represents a collection of values
+//! - [`ClipsValue`] - An enum representing different CLIPS value types
+//! - [`UDFContext`] - Context for user-defined functions to access arguments
+//! - [`Type`] - Type specification for function arguments and return values
+//! - [`ClipsError`] - Error types that can occur during operations
+//!
+//! ## Quick Start
+//!
+//! ### Creating an Environment
+//!
+//! ```
+//! use clips::Environment;
+//!
+//! let mut env = Environment::new().unwrap();
+//! ```
+//!
+//! ### Loading CLIPS Code
+//!
+//! You can load CLIPS constructs (templates, rules, facts) from strings or files:
+//!
+//! ```
+//! # use clips::Environment;
+//! # let mut env = Environment::new().unwrap();
+//! // Load from a string
+//! env.load_from_str("(deftemplate person (slot name) (slot age))").unwrap();
+//!
+//! // Or load from a file
+//! // env.load(std::path::Path::new("knowledge.clp")).unwrap();
+//! ```
+//!
+//! ### Working with Facts
+//!
+//! Facts are instances of templates. Use the builder pattern to create and assert facts:
+//!
+//! ```
+//! # use clips::Environment;
+//! # let mut env = Environment::new().unwrap();
+//! # env.load_from_str("(deftemplate person (slot name) (slot age))").unwrap();
+//! let fact = env.fact_builder("person").unwrap()
+//!     .put_symbol("name", "Alice").unwrap()
+//!     .put_int("age", 30).unwrap();
+//!
+//! env.assert_fact(fact).unwrap();
+//! ```
+//!
+//! ### Running the Inference Engine
+//!
+//! ```
+//! # use clips::Environment;
+//! # let mut env = Environment::new().unwrap();
+//! # env.load_from_str("(deffacts startup (initial-fact))").unwrap();
+//! env.reset();  // Initialize the environment with deffacts
+//! let rule_count = env.run(-1);  // Run all rules (-1 = unlimited)
+//! println!("Fired {} rules", rule_count);
+//! ```
+//!
+//! ### User-Defined Functions (UDFs)
+//!
+//! Register Rust functions to be callable from CLIPS:
+//!
+//! ```
+//! # use clips::{Environment, Type, ClipsValue};
+//! # let mut env = Environment::new().unwrap();
+//! env.add_udf(
+//!     "double",
+//!     Some(Type(Type::INTEGER)),
+//!     1,
+//!     1,
+//!     vec![Type(Type::INTEGER)],
+//!     |_env, ctx| {
+//!         if let Some(ClipsValue::Integer(n)) = ctx.get_next_argument(Type(Type::INTEGER)) {
+//!             ClipsValue::Integer(n * 2)
+//!         } else {
+//!             ClipsValue::Void()
+//!         }
+//!     },
+//! ).unwrap();
+//!
+//! env.load_from_str("(defrule test => (printout t (double 21)))").unwrap();
+//! ```
+//!
+//! ## Builder Pattern
+//!
+//! This crate uses the builder pattern extensively for ergonomic construction of complex objects:
+//!
+//! - **`FactBuilder`**: Chain method calls to set multiple slot values before asserting
+//! - **`MultifieldBuilder`**: Chain method calls to add elements to a multifield collection
+//!
+//! Each builder method returns `self`, allowing you to chain calls:
+//!
+//! ```
+//! # use clips::Environment;
+//! # let mut env = Environment::new().unwrap();
+//! # env.load_from_str("(deftemplate test (slot a) (slot b) (slot c))").unwrap();
+//! let fact = env.fact_builder("test").unwrap()
+//!     .put_int("a", 1).unwrap()
+//!     .put_symbol("b", "x").unwrap()
+//!     .put_float("c", 3.14).unwrap();
+//! ```
+//!
+//! ## Value Types
+//!
+//! CLIPS supports several primitive types:
+//!
+//! - **Symbol**: Unquoted atoms (e.g., `red`, `john`)
+//! - **String**: Quoted text (e.g., `"hello world"`)
+//! - **Integer**: Whole numbers
+//! - **Float**: Decimal numbers
+//! - **Multifield**: Ordered collections of values
+//! - **Void**: No return value or empty result
+//!
+//! The [`ClipsValue`] enum in Rust mirrors these types.
+//!
+//! ## Memory Management
+//!
+//! This crate handles memory management automatically:
+//!
+//! - **`Environment`**: Calls `DestroyEnvironment` in its `Drop` implementation
+//! - **`Fact`**: Automatically retracts itself when dropped (via `Retract`)
+//! - **Builders**: Dispose of resources when dropped
+//!
+//! This ensures no memory leaks when values go out of scope.
+//!
+//! ## Error Handling
+//!
+//! Most operations return `Result<T, ClipsError>`. Use standard Rust error handling:
+//!
+//! ```
+//! # use clips::Environment;
+//! # let mut env = Environment::new().unwrap();
+//! match env.load_from_str("(deftemplate foo (slot x))") {
+//!     Ok(_) => println!("Template loaded"),
+//!     Err(e) => eprintln!("Error: {}", e),
+//! }
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! **Important**: CLIPS is not thread-safe by default. Each CLIPS environment should be
+//! used by a single thread. If you need CLIPS in a multi-threaded application:
+//!
+//! - Create separate `Environment` instances for each thread
+//! - Use synchronization primitives (mutexes, channels) to coordinate access
+//! - Do not share `Environment` pointers between threads across thread boundaries
+//!
+//! ## Limitations and Considerations
+//!
+//! - String operations use UTF-8 encoding; non-UTF-8 strings may cause panics
+//! - CLIPS syntax is case-insensitive in most contexts
+//! - Template and function names must be valid CLIPS identifiers
+//! - Type checking for UDFs happens at the CLIPS level; ensure your Rust code
+//!   handles all specified argument types correctly
+//!
+//! ## Working with Multifields
+//!
+//! Multifields are collections that can hold mixed types:
+//!
+//! ```
+//! # use clips::Environment;
+//! # let mut env = Environment::new().unwrap();
+//! let mf = env.multifield_builder(3).unwrap()
+//!     .put_int(42)
+//!     .put_symbol("test")
+//!     .put_float(3.14)
+//!     .create();
+//!
+//! println!("Multifield length: {}", mf.len());
+//! ```
+//!
+//! ## Examples
+//!
+//! ### Example: A Simple Expert System
+//!
+//! ```no_run
+//! use clips::Environment;
+//!
+//! fn main() -> Result<(), clips::ClipsError> {
+//!     let mut env = Environment::new()?;
+//!
+//!     // Define a template for animals
+//!     env.load_from_str(
+//!         "(deftemplate animal (slot species) (slot legs) (slot flies))"
+//!     )?;
+//!
+//!     // Define rules for classification
+//!     env.load_from_str(
+//!         "(defrule classify-bird
+//!             (animal (species ?name) (legs 2) (flies yes))
+//!             =>
+//!             (printout t ?name \" is a bird\" crlf))"
+//!     )?;
+//!
+//!     // Add some facts
+//!     env.assert_fact(
+//!         env.fact_builder("animal")?
+//!             .put_symbol("species", "sparrow")?
+//!             .put_int("legs", 2)?
+//!             .put_symbol("flies", "yes")?
+//!     )?;
+//!
+//!     // Run the inference engine
+//!     env.reset();
+//!     env.run(-1);
+//!
+//!     Ok(())
+//! }
+//! ```
+
 use clips_sys::clips;
 use std::{
     ffi::{CStr, CString},
@@ -15,7 +246,7 @@ pub enum ClipsError {
     /// Failed to load constructs from a string.
     LoadFromStringError(String),
     /// Failed to build a construct (contains the construct string).
-    BiildParsingError(String),
+    BuildParsingError(String),
     /// Failed to open a file during load (contains the file path).
     LoadOpenFileError(String),
     /// Failed to parse a file or string during load (contains the source).
@@ -28,6 +259,8 @@ pub enum ClipsError {
     PutSlotTypeError(String),
     /// Failed to create a multifield builder.
     MultifieldBuilderError(String),
+    /// Failed to assert a fact built with the fact builder.
+    AssertFactError,
     /// Minimum number of arguments exceeds maximum for a UDF (contains the function name).
     AddUDFMinExceedsMaxError(String),
     /// Function name is already in use (contains the function name).
@@ -44,13 +277,14 @@ impl Display for ClipsError {
             ClipsError::CreateEnvironmentError => write!(f, "Failed to create environment"),
             ClipsError::ClearError => write!(f, "Failed to clear environment"),
             ClipsError::LoadFromStringError(s) => write!(f, "Failed to load from string: {s}"),
-            ClipsError::BiildParsingError(s) => write!(f, "Failed to build construct: {s}"),
+            ClipsError::BuildParsingError(s) => write!(f, "Failed to build construct: {s}"),
             ClipsError::LoadOpenFileError(s) => write!(f, "Failed to open file: {s}"),
             ClipsError::LoadParsingError(s) => write!(f, "Failed to parse file: {s}"),
             ClipsError::DeftemplateNotFoundError(s) => write!(f, "Deftemplate not found: {s}"),
             ClipsError::PutSlotSlotNotFoundError(s) => write!(f, "Slot not found: {s}"),
             ClipsError::PutSlotTypeError(s) => write!(f, "Type error for slot: {s}"),
             ClipsError::MultifieldBuilderError(s) => write!(f, "Failed to create multifield builder: {s}"),
+            ClipsError::AssertFactError => write!(f, "Failed to assert fact"),
             ClipsError::AddUDFMinExceedsMaxError(s) => write!(f, "Minimum number of arguments exceeds maximum for UDF '{s}'"),
             ClipsError::AddUDFFunctionNameInUseError(s) => write!(f, "Function name '{s}' is already in use for UDF"),
             ClipsError::AddUDFInvalidArgumentTypeError(s) => write!(f, "Invalid argument type for UDF '{s}'"),
@@ -222,9 +456,9 @@ impl Environment {
     /// # Returns
     ///
     /// Some(fact) if assertion succeeds, None if it fails.
-    pub fn assert_fact(&mut self, builder: FactBuilder) -> Option<Fact> {
+    pub fn assert_fact(&mut self, builder: FactBuilder) -> Result<Fact, ClipsError> {
         let raw = unsafe { clips::FBAssert(builder.raw) };
-        if raw.is_null() { None } else { Some(Fact::new(raw)) }
+        if raw.is_null() { Err(ClipsError::AssertFactError.into()) } else { Ok(Fact::new(raw)) }
     }
 
     /// Registers a user-defined function (UDF) in the environment.
@@ -719,7 +953,7 @@ mod tests {
         env.load_from_str("(deftemplate test_template (slot test_slot))").unwrap();
         let fact_builder = env.fact_builder("test_template").unwrap().put_symbol("test_slot", "test_value").unwrap();
         let fact = env.assert_fact(fact_builder);
-        assert!(fact.is_some());
+        assert!(fact.is_ok());
     }
 
     #[test]
