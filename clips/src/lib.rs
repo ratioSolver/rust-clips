@@ -97,7 +97,7 @@ impl Environment {
         MultifieldBuilder::new(self, size)
     }
 
-    pub fn add_udf<F>(&mut self, name: &str, return_types: Option<Type>, min_args: u16, max_args: u16, arg_types: Vec<Type>, function: F) -> Result<(), ClipsError>
+    pub fn add_udf<F>(&self, name: &str, return_types: Option<Type>, min_args: u16, max_args: u16, arg_types: Vec<Type>, function: F) -> Result<(), ClipsError>
     where
         F: FnMut(&mut Self, &mut UDFContext) -> ClipsValue + 'static,
     {
