@@ -51,15 +51,15 @@ impl Environment {
         if raw.is_null() { Err(ClipsError::CreateEnvironmentError) } else { Ok(Self { raw }) }
     }
 
-    pub fn clear(&self) -> Result<(), ClipsError> {
+    pub fn clear(&mut self) -> Result<(), ClipsError> {
         if unsafe { clips::Clear(self.raw) } { Ok(()) } else { Err(ClipsError::ClearError) }
     }
 
-    pub fn load_from_str(&self, string: &str) -> Result<(), ClipsError> {
+    pub fn load_from_str(&mut self, string: &str) -> Result<(), ClipsError> {
         if unsafe { clips::LoadFromString(self.raw, string.as_ptr() as *const i8, string.len()) } { Ok(()) } else { Err(ClipsError::LoadFromStringError(string.to_owned()).into()) }
     }
 
-    pub fn load(&self, path: &Path) -> Result<(), ClipsError> {
+    pub fn load(&mut self, path: &Path) -> Result<(), ClipsError> {
         let path_str = CString::new(path.to_str().unwrap()).unwrap();
         let load_error = unsafe { clips::Load(self.raw, path_str.as_ptr() as *const i8) };
 
@@ -71,7 +71,7 @@ impl Environment {
         }
     }
 
-    pub fn build(&self, construct: &str) -> Result<(), ClipsError> {
+    pub fn build(&mut self, construct: &str) -> Result<(), ClipsError> {
         let construct_cstr = CString::new(construct).unwrap();
         let build_error = unsafe { clips::Build(self.raw, construct_cstr.as_ptr() as *const i8) };
         match build_error {
@@ -81,11 +81,11 @@ impl Environment {
         }
     }
 
-    pub fn reset(&self) {
+    pub fn reset(&mut self) {
         unsafe { clips::Reset(self.raw) };
     }
 
-    pub fn run(&self, limit: i64) -> i64 {
+    pub fn run(&mut self, limit: i64) -> i64 {
         unsafe { clips::Run(self.raw, limit) }
     }
 
@@ -97,7 +97,12 @@ impl Environment {
         MultifieldBuilder::new(self, size)
     }
 
-    pub fn add_udf<F>(&self, name: &str, return_types: Option<Type>, min_args: u16, max_args: u16, arg_types: Vec<Type>, function: F) -> Result<(), ClipsError>
+    pub fn assert_fact(&mut self, builder: FactBuilder) -> Option<Fact> {
+        let raw = unsafe { clips::FBAssert(builder.raw) };
+        if raw.is_null() { None } else { Some(Fact::new(raw)) }
+    }
+
+    pub fn add_udf<F>(&mut self, name: &str, return_types: Option<Type>, min_args: u16, max_args: u16, arg_types: Vec<Type>, function: F) -> Result<(), ClipsError>
     where
         F: FnMut(&mut Self, &mut UDFContext) -> ClipsValue + 'static,
     {
@@ -152,26 +157,31 @@ impl MultifieldBuilder {
         Self { raw }
     }
 
-    pub fn put_int(&mut self, value: i64) {
+    pub fn put_int(self, value: i64) -> Self {
         unsafe { clips::MBAppendInteger(self.raw, value) };
+        self
     }
 
-    pub fn put_float(&mut self, value: f64) {
+    pub fn put_float(self, value: f64) -> Self {
         unsafe { clips::MBAppendFloat(self.raw, value) };
+        self
     }
 
-    pub fn put_symbol(&mut self, value: &str) {
+    pub fn put_symbol(self, value: &str) -> Self {
         let value_cstr = CString::new(value).unwrap();
         unsafe { clips::MBAppendSymbol(self.raw, value_cstr.as_ptr() as *const i8) };
+        self
     }
 
-    pub fn put_string(&mut self, value: &str) {
+    pub fn put_string(self, value: &str) -> Self {
         let value_cstr = CString::new(value).unwrap();
         unsafe { clips::MBAppendString(self.raw, value_cstr.as_ptr() as *const i8) };
+        self
     }
 
-    pub fn put_multifield(&mut self, value: Multifield) {
+    pub fn put_multifield(self, value: Multifield) -> Self {
         unsafe { clips::MBAppendMultifield(self.raw, value.raw) };
+        self
     }
 
     pub fn create(self) -> Multifield {
@@ -198,66 +208,61 @@ impl FactBuilder {
         Self { raw }
     }
 
-    pub fn put_int(&mut self, slot_name: &str, value: i64) -> Result<(), ClipsError> {
+    pub fn put_int(self, slot_name: &str, value: i64) -> Result<Self, ClipsError> {
         let slot_name_cstr = CString::new(slot_name).unwrap();
         let put_int_error = unsafe { clips::FBPutSlotInteger(self.raw, slot_name_cstr.as_ptr() as *const i8, value) };
         match put_int_error {
-            clips::PutSlotError_PSE_NO_ERROR => Ok(()),
+            clips::PutSlotError_PSE_NO_ERROR => Ok(self),
             clips::PutSlotError_PSE_SLOT_NOT_FOUND_ERROR => Err(ClipsError::PutSlotSlotNotFoundError(slot_name.to_owned()).into()),
             clips::PutSlotError_PSE_TYPE_ERROR => Err(ClipsError::PutSlotTypeError(slot_name.to_owned()).into()),
             _ => unreachable!(),
         }
     }
 
-    pub fn put_float(&mut self, slot_name: &str, value: f64) -> Result<(), ClipsError> {
+    pub fn put_float(self, slot_name: &str, value: f64) -> Result<Self, ClipsError> {
         let slot_name_cstr = CString::new(slot_name).unwrap();
         let put_float_error = unsafe { clips::FBPutSlotFloat(self.raw, slot_name_cstr.as_ptr() as *const i8, value) };
         match put_float_error {
-            clips::PutSlotError_PSE_NO_ERROR => Ok(()),
+            clips::PutSlotError_PSE_NO_ERROR => Ok(self),
             clips::PutSlotError_PSE_SLOT_NOT_FOUND_ERROR => Err(ClipsError::PutSlotSlotNotFoundError(slot_name.to_owned()).into()),
             clips::PutSlotError_PSE_TYPE_ERROR => Err(ClipsError::PutSlotTypeError(slot_name.to_owned()).into()),
             _ => unreachable!(),
         }
     }
 
-    pub fn put_symbol(&mut self, slot_name: &str, value: &str) -> Result<(), ClipsError> {
+    pub fn put_symbol(self, slot_name: &str, value: &str) -> Result<Self, ClipsError> {
         let slot_name_cstr = CString::new(slot_name).unwrap();
         let value_cstr = CString::new(value).unwrap();
         let put_symbol_error = unsafe { clips::FBPutSlotSymbol(self.raw, slot_name_cstr.as_ptr() as *const i8, value_cstr.as_ptr() as *const i8) };
         match put_symbol_error {
-            clips::PutSlotError_PSE_NO_ERROR => Ok(()),
+            clips::PutSlotError_PSE_NO_ERROR => Ok(self),
             clips::PutSlotError_PSE_SLOT_NOT_FOUND_ERROR => Err(ClipsError::PutSlotSlotNotFoundError(slot_name.to_owned()).into()),
             clips::PutSlotError_PSE_TYPE_ERROR => Err(ClipsError::PutSlotTypeError(slot_name.to_owned()).into()),
             _ => unreachable!(),
         }
     }
 
-    pub fn put_string(&mut self, slot_name: &str, value: &str) -> Result<(), ClipsError> {
+    pub fn put_string(self, slot_name: &str, value: &str) -> Result<Self, ClipsError> {
         let slot_name_cstr = CString::new(slot_name).unwrap();
         let value_cstr = CString::new(value).unwrap();
         let put_string_error = unsafe { clips::FBPutSlotString(self.raw, slot_name_cstr.as_ptr() as *const i8, value_cstr.as_ptr() as *const i8) };
         match put_string_error {
-            clips::PutSlotError_PSE_NO_ERROR => Ok(()),
+            clips::PutSlotError_PSE_NO_ERROR => Ok(self),
             clips::PutSlotError_PSE_SLOT_NOT_FOUND_ERROR => Err(ClipsError::PutSlotSlotNotFoundError(slot_name.to_owned()).into()),
             clips::PutSlotError_PSE_TYPE_ERROR => Err(ClipsError::PutSlotTypeError(slot_name.to_owned()).into()),
             _ => unreachable!(),
         }
     }
 
-    pub fn put_multifield(&mut self, slot_name: &str, value: Multifield) -> Result<(), ClipsError> {
+    pub fn put_multifield(self, slot_name: &str, value: Multifield) -> Result<Self, ClipsError> {
         let slot_name_cstr = CString::new(slot_name).unwrap();
         let put_multifield_error = unsafe { clips::FBPutSlotMultifield(self.raw, slot_name_cstr.as_ptr() as *const i8, value.raw) };
         match put_multifield_error {
-            clips::PutSlotError_PSE_NO_ERROR => Ok(()),
+            clips::PutSlotError_PSE_NO_ERROR => Ok(self),
             clips::PutSlotError_PSE_SLOT_NOT_FOUND_ERROR => Err(ClipsError::PutSlotSlotNotFoundError(slot_name.to_owned()).into()),
             clips::PutSlotError_PSE_TYPE_ERROR => Err(ClipsError::PutSlotTypeError(slot_name.to_owned()).into()),
             _ => unreachable!(),
         }
-    }
-
-    pub fn assert(self) -> Option<Fact> {
-        let raw = unsafe { clips::FBAssert(self.raw) };
-        if raw.is_null() { None } else { Some(Fact::new(raw)) }
     }
 }
 
@@ -397,16 +402,16 @@ unsafe extern "C" fn trampoline(env: *mut clips::Environment, context: *mut clip
                 (*return_value).__bindgen_anon_1.integerValue = clips::CreateInteger(env, i);
             }
             ClipsValue::Multifield(vals) => {
-                let mut mb = safe_env.multifield_builder(vals.len());
-                for v in vals {
+                let mb = safe_env.multifield_builder(vals.len());
+                let mb = vals.iter().fold(mb, |mb, v| {
                     match v {
-                        ClipsValue::Integer(i) => mb.put_int(i),
-                        ClipsValue::Float(f) => mb.put_float(f),
-                        ClipsValue::Symbol(s) => mb.put_symbol(&s),
-                        ClipsValue::String(s) => mb.put_string(&s),
-                        _ => {}
+                        ClipsValue::Integer(i) => mb.put_int(*i),
+                        ClipsValue::Float(f) => mb.put_float(*f),
+                        ClipsValue::Symbol(s) => mb.put_symbol(s),
+                        ClipsValue::String(s) => mb.put_string(s),
+                        _ => mb, // Return builder unchanged for unsupported types
                     }
-                }
+                });
                 let mf = mb.create();
                 (*return_value).__bindgen_anon_1.multifieldValue = mf.raw;
                 std::mem::forget(mf);
@@ -427,21 +432,21 @@ mod tests {
 
     #[test]
     fn test_environment_clear() {
-        let env = Environment::new().unwrap();
+        let mut env = Environment::new().unwrap();
         let result = env.clear();
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_load_from_string() {
-        let env = Environment::new().unwrap();
+        let mut env = Environment::new().unwrap();
         let result = env.load_from_str("(deftemplate test_deftemplate)");
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_load_from_string_error() {
-        let env = Environment::new().unwrap();
+        let mut env = Environment::new().unwrap();
         let result = env.load_from_str("(deftemplate test_deftemplate");
         assert!(result.is_err());
     }
@@ -449,21 +454,21 @@ mod tests {
     #[test]
     #[ignore]
     fn test_load_from_file() {
-        let env = Environment::new().unwrap();
+        let mut env = Environment::new().unwrap();
         let result = env.load(Path::new("test.clp"));
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_load_from_file_error() {
-        let env = Environment::new().unwrap();
+        let mut env = Environment::new().unwrap();
         let result = env.load(Path::new("non_existent_file.clp"));
         assert!(result.is_err());
     }
 
     #[test]
     fn test_run() {
-        let env = Environment::new().unwrap();
+        let mut env = Environment::new().unwrap();
         env.load_from_str("(deffacts test_facts (initial-fact))").unwrap();
         let result = env.run(-1);
         assert_eq!(result, 0);
@@ -471,29 +476,23 @@ mod tests {
 
     #[test]
     fn test_fact_builder() {
-        let env = Environment::new().unwrap();
+        let mut env = Environment::new().unwrap();
         env.load_from_str("(deftemplate test_template (slot test_slot))").unwrap();
-        let mut fact_builder = env.fact_builder("test_template");
-        let put_result = fact_builder.put_symbol("test_slot", "test_value");
-        assert!(put_result.is_ok());
-        let fact = fact_builder.assert();
+        let fact_builder = env.fact_builder("test_template").put_symbol("test_slot", "test_value").unwrap();
+        let fact = env.assert_fact(fact_builder);
         assert!(fact.is_some());
     }
 
     #[test]
     fn test_multifield_builder() {
         let env = Environment::new().unwrap();
-        let mut multifield_builder = env.multifield_builder(3);
-        multifield_builder.put_int(42);
-        multifield_builder.put_float(3.14);
-        multifield_builder.put_symbol("test_symbol");
-        let multifield = multifield_builder.create();
+        let multifield = env.multifield_builder(3).put_int(42).put_float(3.14).put_symbol("test_symbol").create();
         assert!(multifield.raw.is_null() == false);
     }
 
     #[test]
     fn test_add_udf() {
-        let env = Environment::new().unwrap();
+        let mut env = Environment::new().unwrap();
         let called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let called_clone = called.clone();
 
@@ -512,7 +511,7 @@ mod tests {
 
     #[test]
     fn test_add_udf_with_args() {
-        let env = Environment::new().unwrap();
+        let mut env = Environment::new().unwrap();
         let value = std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0));
         let value_clone = value.clone();
 
@@ -534,14 +533,14 @@ mod tests {
 
     #[test]
     fn test_build() {
-        let env = Environment::new().unwrap();
+        let mut env = Environment::new().unwrap();
         let result = env.build("(deftemplate test_build_template (slot test_slot))");
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_build_error() {
-        let env = Environment::new().unwrap();
+        let mut env = Environment::new().unwrap();
         let result = env.build("(deftemplate test_build_template");
         assert!(result.is_err());
     }
