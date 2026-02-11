@@ -10,8 +10,7 @@ pub enum ClipsError {
     CreateEnvironmentError,
     ClearError,
     LoadFromStringError(String),
-    RemoveUDFError(String),
-    BatchStarError(String),
+    BiildParsingError(String),
     LoadOpenFileError(String),
     LoadParsingError(String),
     PutSlotSlotNotFoundError(String),
@@ -28,8 +27,7 @@ impl Display for ClipsError {
             ClipsError::CreateEnvironmentError => write!(f, "Failed to create environment"),
             ClipsError::ClearError => write!(f, "Failed to clear environment"),
             ClipsError::LoadFromStringError(s) => write!(f, "Failed to load from string: {s}"),
-            ClipsError::RemoveUDFError(s) => write!(f, "Failed to remove UDF: {s}"),
-            ClipsError::BatchStarError(s) => write!(f, "Batch* error: {s}"),
+            ClipsError::BiildParsingError(s) => write!(f, "Failed to build construct: {s}"),
             ClipsError::LoadOpenFileError(s) => write!(f, "Failed to open file: {s}"),
             ClipsError::LoadParsingError(s) => write!(f, "Failed to parse file: {s}"),
             ClipsError::PutSlotSlotNotFoundError(s) => write!(f, "Slot not found: {s}"),
@@ -69,6 +67,16 @@ impl Environment {
             clips::LoadError_LE_NO_ERROR => Ok(()),
             clips::LoadError_LE_OPEN_FILE_ERROR => Err(ClipsError::LoadOpenFileError(path.to_str().unwrap().to_owned()).into()),
             clips::LoadError_LE_PARSING_ERROR => Err(ClipsError::LoadParsingError(path.to_str().unwrap().to_owned()).into()),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn build(&self, construct: &str) -> Result<(), ClipsError> {
+        let construct_cstr = CString::new(construct).unwrap();
+        let build_error = unsafe { clips::Build(self.raw, construct_cstr.as_ptr() as *const i8) };
+        match build_error {
+            clips::BuildError_BE_NO_ERROR => Ok(()),
+            clips::BuildError_BE_PARSING_ERROR => Err(ClipsError::LoadParsingError(construct.to_owned()).into()),
             _ => unreachable!(),
         }
     }
@@ -522,5 +530,19 @@ mod tests {
         env.run(-1);
 
         assert_eq!(value.load(std::sync::atomic::Ordering::SeqCst), 42);
+    }
+
+    #[test]
+    fn test_build() {
+        let env = Environment::new().unwrap();
+        let result = env.build("(deftemplate test_build_template (slot test_slot))");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_build_error() {
+        let env = Environment::new().unwrap();
+        let result = env.build("(deftemplate test_build_template");
+        assert!(result.is_err());
     }
 }
