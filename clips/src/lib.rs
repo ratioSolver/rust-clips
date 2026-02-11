@@ -5,19 +5,32 @@ use std::{
     path::Path,
 };
 
+/// Errors that can occur when using the CLIPS environment.
 #[derive(Debug)]
 pub enum ClipsError {
+    /// Failed to create a new CLIPS environment.
     CreateEnvironmentError,
+    /// Failed to clear the environment.
     ClearError,
+    /// Failed to load constructs from a string.
     LoadFromStringError(String),
+    /// Failed to build a construct (contains the construct string).
     BiildParsingError(String),
+    /// Failed to open a file during load (contains the file path).
     LoadOpenFileError(String),
+    /// Failed to parse a file or string during load (contains the source).
     LoadParsingError(String),
+    /// A slot was not found in a fact template (contains the slot name).
     PutSlotSlotNotFoundError(String),
+    /// Type mismatch when setting a slot value (contains the slot name).
     PutSlotTypeError(String),
+    /// Minimum number of arguments exceeds maximum for a UDF (contains the function name).
     AddUDFMinExceedsMaxError(String),
+    /// Function name is already in use (contains the function name).
     AddUDFFunctionNameInUseError(String),
+    /// Invalid argument type for a UDF (contains the function name).
     AddUDFInvalidArgumentTypeError(String),
+    /// Invalid return type for a UDF (contains the function name).
     AddUDFInvalidReturnTypeError(String),
 }
 
@@ -40,25 +53,67 @@ impl Display for ClipsError {
     }
 }
 
+/// A CLIPS rule engine environment.
+///
+/// The `Environment` is the main interface to the CLIPS inference engine.
+/// It manages facts, rules, templates, and user-defined functions.
+///
+/// # Examples
+///
+/// ```
+/// use clips::Environment;
+///
+/// let mut env = Environment::new().unwrap();
+/// env.load_from_str("(deftemplate person (slot name))").unwrap();
+/// ```
 #[derive(Debug)]
 pub struct Environment {
     raw: *mut clips::Environment,
 }
 
 impl Environment {
+    /// Creates a new CLIPS environment.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ClipsError::CreateEnvironmentError` if the environment cannot be created.
     pub fn new() -> Result<Self, ClipsError> {
         let raw = unsafe { clips::CreateEnvironment() };
         if raw.is_null() { Err(ClipsError::CreateEnvironmentError) } else { Ok(Self { raw }) }
     }
 
+    /// Clears all constructs (facts, rules, templates) from the environment.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ClipsError::ClearError` if the clear operation fails.
     pub fn clear(&mut self) -> Result<(), ClipsError> {
         if unsafe { clips::Clear(self.raw) } { Ok(()) } else { Err(ClipsError::ClearError) }
     }
 
+    /// Loads CLIPS constructs from a string.
+    ///
+    /// # Arguments
+    ///
+    /// * `string` - A CLIPS language string containing deftemplate, defrule, or other constructs
+    ///
+    /// # Errors
+    ///
+    /// Returns `ClipsError::LoadFromStringError` if parsing fails.
     pub fn load_from_str(&mut self, string: &str) -> Result<(), ClipsError> {
         if unsafe { clips::LoadFromString(self.raw, string.as_ptr() as *const i8, string.len()) } { Ok(()) } else { Err(ClipsError::LoadFromStringError(string.to_owned()).into()) }
     }
 
+    /// Loads CLIPS constructs from a file.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path to the CLIPS file
+    ///
+    /// # Errors
+    ///
+    /// Returns `ClipsError::LoadOpenFileError` if the file cannot be opened,
+    /// or `ClipsError::LoadParsingError` if parsing fails.
     pub fn load(&mut self, path: &Path) -> Result<(), ClipsError> {
         let path_str = CString::new(path.to_str().unwrap()).unwrap();
         let load_error = unsafe { clips::Load(self.raw, path_str.as_ptr() as *const i8) };
@@ -71,6 +126,17 @@ impl Environment {
         }
     }
 
+    /// Builds a single construct from a string.
+    ///
+    /// Similar to `load_from_str`, but for a single construct.
+    ///
+    /// # Arguments
+    ///
+    /// * `construct` - A CLIPS construct string (e.g., "(deftemplate foo (slot x))")
+    ///
+    /// # Errors
+    ///
+    /// Returns `ClipsError::LoadParsingError` if the construct is invalid.
     pub fn build(&mut self, construct: &str) -> Result<(), ClipsError> {
         let construct_cstr = CString::new(construct).unwrap();
         let build_error = unsafe { clips::Build(self.raw, construct_cstr.as_ptr() as *const i8) };
@@ -81,27 +147,112 @@ impl Environment {
         }
     }
 
+    /// Resets the environment to its initial state.
+    ///
+    /// This executes deffacts and initial-fact, preparing the engine for rule execution.
     pub fn reset(&mut self) {
         unsafe { clips::Reset(self.raw) };
     }
 
+    /// Runs the inference engine until no more rules fire or the limit is reached.
+    ///
+    /// # Arguments
+    ///
+    /// * `limit` - Maximum number of rule firings. Use -1 for no limit.
+    ///
+    /// # Returns
+    ///
+    /// The number of rules that fired.
     pub fn run(&mut self, limit: i64) -> i64 {
         unsafe { clips::Run(self.raw, limit) }
     }
 
+    /// Creates a fact builder for the given template.
+    ///
+    /// # Arguments
+    ///
+    /// * `template_name` - The name of the fact template
+    ///
+    /// # Returns
+    ///
+    /// A builder that can be used to set slot values and assert the fact.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use clips::Environment;
+    /// # let mut env = Environment::new().unwrap();
+    /// # env.load_from_str("(deftemplate person (slot name) (slot age))").unwrap();
+    /// let fact = env.fact_builder("person")
+    ///     .put_symbol("name", "John").unwrap()
+    ///     .put_int("age", 30).unwrap();
+    /// ```
     pub fn fact_builder(&self, template_name: &str) -> FactBuilder {
         FactBuilder::new(self, template_name)
     }
 
+    /// Creates a multifield builder.
+    ///
+    /// # Arguments
+    ///
+    /// * `size` - Initial capacity of the multifield
+    ///
+    /// # Returns
+    ///
+    /// A builder that can be used to populate multiple values.
     pub fn multifield_builder(&self, size: usize) -> MultifieldBuilder {
         MultifieldBuilder::new(self, size)
     }
 
+    /// Asserts a fact built with `fact_builder`.
+    ///
+    /// # Arguments
+    ///
+    /// * `builder` - The completed fact builder
+    ///
+    /// # Returns
+    ///
+    /// Some(fact) if assertion succeeds, None if it fails.
     pub fn assert_fact(&mut self, builder: FactBuilder) -> Option<Fact> {
         let raw = unsafe { clips::FBAssert(builder.raw) };
         if raw.is_null() { None } else { Some(Fact::new(raw)) }
     }
 
+    /// Registers a user-defined function (UDF) in the environment.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Function name as callable from CLIPS
+    /// * `return_types` - Expected return type(s), or None for any type
+    /// * `min_args` - Minimum number of arguments
+    /// * `max_args` - Maximum number of arguments
+    /// * `arg_types` - Vector of expected argument types
+    /// * `function` - Rust closure implementing the function
+    ///
+    /// # Errors
+    ///
+    /// Returns various `ClipsError` variants if the UDF registration fails.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use clips::{Environment, Type, ClipsValue};
+    /// # let mut env = Environment::new().unwrap();
+    /// env.add_udf(
+    ///     "double",
+    ///     Some(Type(Type::INTEGER)),
+    ///     1,
+    ///     1,
+    ///     vec![Type(Type::INTEGER)],
+    ///     |_env, ctx| {
+    ///         if let Some(ClipsValue::Integer(n)) = ctx.get_next_argument(Type(Type::INTEGER)) {
+    ///             ClipsValue::Integer(n * 2)
+    ///         } else {
+    ///             ClipsValue::Void()
+    ///         }
+    ///     },
+    /// ).unwrap();
+    /// ```
     pub fn add_udf<F>(&mut self, name: &str, return_types: Option<Type>, min_args: u16, max_args: u16, arg_types: Vec<Type>, function: F) -> Result<(), ClipsError>
     where
         F: FnMut(&mut Self, &mut UDFContext) -> ClipsValue + 'static,
@@ -131,6 +282,9 @@ impl Drop for Environment {
     }
 }
 
+/// A multifield value in CLIPS.
+///
+/// Multifields are ordered collections of values of potentially different types.
 #[derive(Debug)]
 pub struct Multifield {
     raw: *mut clips::Multifield,
@@ -141,11 +295,16 @@ impl Multifield {
         Self { raw }
     }
 
+    /// Returns the number of elements in the multifield.
     pub fn len(&self) -> usize {
         unsafe { (*self.raw).length as usize }
     }
 }
 
+/// Builder for constructing multifield values.
+///
+/// This builder allows you to populate a multifield with values of various types.
+/// It uses method chaining for ergonomic construction.
 #[derive(Debug)]
 pub struct MultifieldBuilder {
     raw: *mut clips::MultifieldBuilder,
@@ -157,33 +316,39 @@ impl MultifieldBuilder {
         Self { raw }
     }
 
+    /// Appends an integer value to the multifield.
     pub fn put_int(self, value: i64) -> Self {
         unsafe { clips::MBAppendInteger(self.raw, value) };
         self
     }
 
+    /// Appends a float value to the multifield.
     pub fn put_float(self, value: f64) -> Self {
         unsafe { clips::MBAppendFloat(self.raw, value) };
         self
     }
 
+    /// Appends a symbol (unquoted string) to the multifield.
     pub fn put_symbol(self, value: &str) -> Self {
         let value_cstr = CString::new(value).unwrap();
         unsafe { clips::MBAppendSymbol(self.raw, value_cstr.as_ptr() as *const i8) };
         self
     }
 
+    /// Appends a string (quoted) value to the multifield.
     pub fn put_string(self, value: &str) -> Self {
         let value_cstr = CString::new(value).unwrap();
         unsafe { clips::MBAppendString(self.raw, value_cstr.as_ptr() as *const i8) };
         self
     }
 
+    /// Appends a multifield to this multifield.
     pub fn put_multifield(self, value: Multifield) -> Self {
         unsafe { clips::MBAppendMultifield(self.raw, value.raw) };
         self
     }
 
+    /// Finalizes the multifield and returns the result.
     pub fn create(self) -> Multifield {
         let raw = unsafe { clips::MBCreate(self.raw) };
         Multifield::new(raw)
@@ -196,6 +361,11 @@ impl Drop for MultifieldBuilder {
     }
 }
 
+/// Builder for constructing facts.
+///
+/// A fact is an instance of a template with specific slot values.
+/// This builder allows you to specify all slot values before asserting the fact.
+/// It uses method chaining and supports error handling for type mismatches.
 #[derive(Debug)]
 pub struct FactBuilder {
     raw: *mut clips::FactBuilder,
@@ -208,6 +378,11 @@ impl FactBuilder {
         Self { raw }
     }
 
+    /// Sets an integer slot value.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the slot doesn't exist or the type is mismatched.
     pub fn put_int(self, slot_name: &str, value: i64) -> Result<Self, ClipsError> {
         let slot_name_cstr = CString::new(slot_name).unwrap();
         let put_int_error = unsafe { clips::FBPutSlotInteger(self.raw, slot_name_cstr.as_ptr() as *const i8, value) };
@@ -219,6 +394,11 @@ impl FactBuilder {
         }
     }
 
+    /// Sets a float slot value.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the slot doesn't exist or the type is mismatched.
     pub fn put_float(self, slot_name: &str, value: f64) -> Result<Self, ClipsError> {
         let slot_name_cstr = CString::new(slot_name).unwrap();
         let put_float_error = unsafe { clips::FBPutSlotFloat(self.raw, slot_name_cstr.as_ptr() as *const i8, value) };
@@ -230,6 +410,11 @@ impl FactBuilder {
         }
     }
 
+    /// Sets a symbol (unquoted string) slot value.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the slot doesn't exist or the type is mismatched.
     pub fn put_symbol(self, slot_name: &str, value: &str) -> Result<Self, ClipsError> {
         let slot_name_cstr = CString::new(slot_name).unwrap();
         let value_cstr = CString::new(value).unwrap();
@@ -242,6 +427,11 @@ impl FactBuilder {
         }
     }
 
+    /// Sets a string (quoted) slot value.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the slot doesn't exist or the type is mismatched.
     pub fn put_string(self, slot_name: &str, value: &str) -> Result<Self, ClipsError> {
         let slot_name_cstr = CString::new(slot_name).unwrap();
         let value_cstr = CString::new(value).unwrap();
@@ -254,6 +444,11 @@ impl FactBuilder {
         }
     }
 
+    /// Sets a multifield slot value.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the slot doesn't exist or the type is mismatched.
     pub fn put_multifield(self, slot_name: &str, value: Multifield) -> Result<Self, ClipsError> {
         let slot_name_cstr = CString::new(slot_name).unwrap();
         let put_multifield_error = unsafe { clips::FBPutSlotMultifield(self.raw, slot_name_cstr.as_ptr() as *const i8, value.raw) };
@@ -272,6 +467,10 @@ impl Drop for FactBuilder {
     }
 }
 
+/// A fact in the CLIPS knowledge base.
+///
+/// A fact is an instance of a template with specific slot values.
+/// Facts are automatically retracted when dropped.
 #[derive(Debug)]
 pub struct Fact {
     raw: *mut clips::Fact,
@@ -289,16 +488,27 @@ impl Drop for Fact {
     }
 }
 
+/// A CLIPS value type specification.
+///
+/// Used to specify expected argument and return types for user-defined functions.
+/// Types can be combined using bitwise OR to specify multiple acceptable types.
 pub struct Type(pub u32);
 const CODES: &[(u32, char)] = &[(clips::CLIPSType_BOOLEAN_BIT, 'b'), (clips::CLIPSType_INTEGER_BIT, 'l'), (clips::CLIPSType_FLOAT_BIT, 'd'), (clips::CLIPSType_STRING_BIT, 's'), (clips::CLIPSType_SYMBOL_BIT, 'y'), (clips::CLIPSType_VOID_BIT, 'v'), (clips::CLIPSType_MULTIFIELD_BIT, 'm')];
 
 impl Type {
+    /// Boolean type
     pub const BOOLEAN: u32 = clips::CLIPSType_BOOLEAN_BIT;
+    /// Symbol (unquoted atom) type
     pub const SYMBOL: u32 = clips::CLIPSType_SYMBOL_BIT;
+    /// String (quoted) type
     pub const STRING: u32 = clips::CLIPSType_STRING_BIT;
+    /// Float type
     pub const FLOAT: u32 = clips::CLIPSType_FLOAT_BIT;
+    /// Integer type
     pub const INTEGER: u32 = clips::CLIPSType_INTEGER_BIT;
+    /// Void (no return value) type
     pub const VOID: u32 = clips::CLIPSType_VOID_BIT;
+    /// Multifield (collection) type
     pub const MULTIFIELD: u32 = clips::CLIPSType_MULTIFIELD_BIT;
 
     fn format(mask: &Type) -> String {
@@ -309,6 +519,9 @@ impl Type {
     }
 }
 
+/// Context for a user-defined function call.
+///
+/// Provides access to arguments passed to a UDF from CLIPS.
 #[derive(Debug)]
 pub struct UDFContext {
     raw: *mut clips::UDFContext,
@@ -319,23 +532,43 @@ impl UDFContext {
         Self { raw }
     }
 
+    /// Retrieves the next argument from the UDF call.
+    ///
+    /// # Arguments
+    ///
+    /// * `expected_type` - The expected type of the argument
+    ///
+    /// # Returns
+    ///
+    /// Some(value) if an argument is available and matches the expected type, None otherwise.
     pub fn get_next_argument(&self, expected_type: Type) -> Option<ClipsValue> {
         let mut arg = std::mem::MaybeUninit::<clips::UDFValue>::uninit();
         if unsafe { clips::UDFNextArgument(self.raw, expected_type.0, arg.as_mut_ptr()) } { Some(unsafe { arg.assume_init().into() }) } else { None }
     }
 
+    /// Checks if there are more arguments to retrieve.
     pub fn has_next_argument(&self) -> bool {
         unsafe { !(*self.raw).lastArg.is_null() }
     }
 }
 
+/// A value that can be used in CLIPS.
+///
+/// Represents the different types of values that CLIPS can work with,
+/// returned from UDFs or retrieved from the environment.
 #[derive(Debug)]
 pub enum ClipsValue {
+    /// An unquoted atom
     Symbol(String),
+    /// A quoted string
     String(String),
+    /// A floating-point number
     Float(f64),
+    /// An integer
     Integer(i64),
+    /// Void (no return value)
     Void(),
+    /// An ordered collection of values
     Multifield(Vec<ClipsValue>),
 }
 
