@@ -99,7 +99,7 @@
 //!     },
 //! ).unwrap();
 //!
-//! env.load_from_str("(defrule test => (printout t (double 21)))").unwrap();
+//! env.load_from_str("(defrule test_rule => (printout t (double 21)))").unwrap();
 //! ```
 //!
 //! ## Builder Pattern
@@ -114,11 +114,30 @@
 //! ```
 //! # use clips::Environment;
 //! # let mut env = Environment::new().unwrap();
-//! # env.load_from_str("(deftemplate test (slot a) (slot b) (slot c))").unwrap();
-//! let fact = env.fact_builder("test").unwrap()
+//! # env.load_from_str("(deftemplate test_deftemplate (slot a) (slot b) (slot c))").unwrap();
+//! let fact = env.fact_builder("test_deftemplate").unwrap()
 //!     .put_int("a", 1).unwrap()
 //!     .put_symbol("b", "x").unwrap()
 //!     .put_float("c", 3.14).unwrap();
+//! env.assert_fact(fact).unwrap();
+//! ```
+//!
+//! ## Modifying Facts
+//!
+//! Use `FactModifier` to change slot values of an existing fact:
+//!
+//! ```
+//! # use clips::Environment;
+//! # let mut env = Environment::new().unwrap();
+//! # env.load_from_str("(deftemplate test_deftemplate (slot a) (slot b))").unwrap();
+//! # let builder = env.fact_builder("test_deftemplate").unwrap()
+//! #     .put_int("a", 1).unwrap()
+//! #     .put_symbol("b", "x").unwrap();
+//! # let fact = env.assert_fact(builder).unwrap();
+//! let modifier = env.fact_modifier(&fact).unwrap()
+//!    .put_int("a", 42).unwrap()
+//!    .put_symbol("b", "y").unwrap();
+//! env.modify_fact(modifier).unwrap();
 //! ```
 //!
 //! ## Value Types
@@ -426,11 +445,41 @@ impl Environment {
     /// let fact = env.fact_builder("person").unwrap()
     ///     .put_symbol("name", "John").unwrap()
     ///     .put_int("age", 30).unwrap();
+    /// let fact = env.assert_fact(fact).unwrap();
     /// ```
     pub fn fact_builder(&self, template_name: &str) -> Result<FactBuilder, ClipsError> {
         let template_name_cstr = CString::new(template_name).unwrap();
         let raw = unsafe { clips::CreateFactBuilder(self.raw, template_name_cstr.as_ptr() as *const i8) };
         if raw.is_null() { Err(ClipsError::DeftemplateNotFoundError(template_name.to_owned()).into()) } else { Ok(FactBuilder::new(raw)) }
+    }
+
+    /// Creates a fact modifier for an existing fact.
+    ///
+    /// # Arguments
+    ///
+    /// * `fact` - The fact to modify
+    ///
+    /// # Returns
+    ///
+    /// A builder that can be used to set new slot values and modify the fact.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use clips::Environment;
+    /// # let mut env = Environment::new().unwrap();
+    /// # env.load_from_str("(deftemplate person (slot name) (slot age))").unwrap();
+    /// # let builder = env.fact_builder("person").unwrap()
+    /// #     .put_symbol("name", "John").unwrap()
+    /// #     .put_int("age", 30).unwrap();
+    /// # let fact = env.assert_fact(builder).unwrap();
+    /// let modifier = env.fact_modifier(&fact).unwrap()
+    ///     .put_int("age", 31).unwrap();
+    /// env.modify_fact(modifier).unwrap();
+    /// ```
+    pub fn fact_modifier(&self, fact: &Fact) -> Result<FactModifier, ClipsError> {
+        let raw = unsafe { clips::CreateFactModifier(self.raw, fact.raw) };
+        if raw.is_null() { Err(ClipsError::DeftemplateNotFoundError("fact".to_string()).into()) } else { Ok(FactModifier::new(raw)) }
     }
 
     /// Creates a multifield builder.
@@ -458,6 +507,20 @@ impl Environment {
     /// Some(fact) if assertion succeeds, None if it fails.
     pub fn assert_fact(&mut self, builder: FactBuilder) -> Result<Fact, ClipsError> {
         let raw = unsafe { clips::FBAssert(builder.raw) };
+        if raw.is_null() { Err(ClipsError::AssertFactError.into()) } else { Ok(Fact::new(raw)) }
+    }
+
+    /// Modifies a fact using a fact modifier built with `fact_modifier`.
+    ///
+    /// # Arguments
+    ///
+    /// * `modifier` - The completed fact modifier
+    ///
+    /// # Returns
+    ///
+    /// Some(fact) if modification succeeds, None if it fails.
+    pub fn modify_fact(&mut self, modifier: FactModifier) -> Result<Fact, ClipsError> {
+        let raw = unsafe { clips::FMModify(modifier.raw) };
         if raw.is_null() { Err(ClipsError::AssertFactError.into()) } else { Ok(Fact::new(raw)) }
     }
 
@@ -704,6 +767,110 @@ impl FactBuilder {
 impl Drop for FactBuilder {
     fn drop(&mut self) {
         unsafe { clips::FBDispose(self.raw) };
+    }
+}
+
+/// Modifier for modifying facts.
+///
+/// A fact is an instance of a template with specific slot values.
+/// This builder allows you to specify all slot values before modifying the fact.
+/// It uses method chaining and supports error handling for type mismatches.
+#[derive(Debug)]
+pub struct FactModifier {
+    raw: *mut clips::FactModifier,
+}
+
+impl FactModifier {
+    fn new(raw: *mut clips::FactModifier) -> Self {
+        Self { raw }
+    }
+
+    /// Sets an integer slot value.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the slot doesn't exist or the type is mismatched.
+    pub fn put_int(self, slot_name: &str, value: i64) -> Result<Self, ClipsError> {
+        let slot_name_cstr = CString::new(slot_name).unwrap();
+        let put_int_error = unsafe { clips::FMPutSlotInteger(self.raw, slot_name_cstr.as_ptr() as *const i8, value) };
+        match put_int_error {
+            clips::PutSlotError_PSE_NO_ERROR => Ok(self),
+            clips::PutSlotError_PSE_SLOT_NOT_FOUND_ERROR => Err(ClipsError::PutSlotSlotNotFoundError(slot_name.to_owned()).into()),
+            clips::PutSlotError_PSE_TYPE_ERROR => Err(ClipsError::PutSlotTypeError(slot_name.to_owned()).into()),
+            _ => unreachable!(),
+        }
+    }
+
+    /// Sets a float slot value.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the slot doesn't exist or the type is mismatched.
+    pub fn put_float(self, slot_name: &str, value: f64) -> Result<Self, ClipsError> {
+        let slot_name_cstr = CString::new(slot_name).unwrap();
+        let put_float_error = unsafe { clips::FMPutSlotFloat(self.raw, slot_name_cstr.as_ptr() as *const i8, value) };
+        match put_float_error {
+            clips::PutSlotError_PSE_NO_ERROR => Ok(self),
+            clips::PutSlotError_PSE_SLOT_NOT_FOUND_ERROR => Err(ClipsError::PutSlotSlotNotFoundError(slot_name.to_owned()).into()),
+            clips::PutSlotError_PSE_TYPE_ERROR => Err(ClipsError::PutSlotTypeError(slot_name.to_owned()).into()),
+            _ => unreachable!(),
+        }
+    }
+
+    /// Sets a symbol (unquoted string) slot value.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the slot doesn't exist or the type is mismatched.
+    pub fn put_symbol(self, slot_name: &str, value: &str) -> Result<Self, ClipsError> {
+        let slot_name_cstr = CString::new(slot_name).unwrap();
+        let value_cstr = CString::new(value).unwrap();
+        let put_symbol_error = unsafe { clips::FMPutSlotSymbol(self.raw, slot_name_cstr.as_ptr() as *const i8, value_cstr.as_ptr() as *const i8) };
+        match put_symbol_error {
+            clips::PutSlotError_PSE_NO_ERROR => Ok(self),
+            clips::PutSlotError_PSE_SLOT_NOT_FOUND_ERROR => Err(ClipsError::PutSlotSlotNotFoundError(slot_name.to_owned()).into()),
+            clips::PutSlotError_PSE_TYPE_ERROR => Err(ClipsError::PutSlotTypeError(slot_name.to_owned()).into()),
+            _ => unreachable!(),
+        }
+    }
+
+    /// Sets a string (quoted) slot value.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the slot doesn't exist or the type is mismatched.
+    pub fn put_string(self, slot_name: &str, value: &str) -> Result<Self, ClipsError> {
+        let slot_name_cstr = CString::new(slot_name).unwrap();
+        let value_cstr = CString::new(value).unwrap();
+        let put_string_error = unsafe { clips::FMPutSlotString(self.raw, slot_name_cstr.as_ptr() as *const i8, value_cstr.as_ptr() as *const i8) };
+        match put_string_error {
+            clips::PutSlotError_PSE_NO_ERROR => Ok(self),
+            clips::PutSlotError_PSE_SLOT_NOT_FOUND_ERROR => Err(ClipsError::PutSlotSlotNotFoundError(slot_name.to_owned()).into()),
+            clips::PutSlotError_PSE_TYPE_ERROR => Err(ClipsError::PutSlotTypeError(slot_name.to_owned()).into()),
+            _ => unreachable!(),
+        }
+    }
+
+    /// Sets a multifield slot value.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the slot doesn't exist or the type is mismatched.
+    pub fn put_multifield(self, slot_name: &str, value: Multifield) -> Result<Self, ClipsError> {
+        let slot_name_cstr = CString::new(slot_name).unwrap();
+        let put_multifield_error = unsafe { clips::FMPutSlotMultifield(self.raw, slot_name_cstr.as_ptr() as *const i8, value.raw) };
+        match put_multifield_error {
+            clips::PutSlotError_PSE_NO_ERROR => Ok(self),
+            clips::PutSlotError_PSE_SLOT_NOT_FOUND_ERROR => Err(ClipsError::PutSlotSlotNotFoundError(slot_name.to_owned()).into()),
+            clips::PutSlotError_PSE_TYPE_ERROR => Err(ClipsError::PutSlotTypeError(slot_name.to_owned()).into()),
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl Drop for FactModifier {
+    fn drop(&mut self) {
+        unsafe { clips::FMDispose(self.raw) };
     }
 }
 
@@ -954,6 +1121,31 @@ mod tests {
         let fact_builder = env.fact_builder("test_template").unwrap().put_symbol("test_slot", "test_value").unwrap();
         let fact = env.assert_fact(fact_builder);
         assert!(fact.is_ok());
+    }
+
+    #[test]
+    fn test_fact_modifier() {
+        let mut env = Environment::new().unwrap();
+        env.load_from_str("(deftemplate test_template (slot a) (slot b))").unwrap();
+
+        let builder = env.fact_builder("test_template").unwrap().put_int("a", 1).unwrap().put_symbol("b", "x").unwrap();
+        let fact = env.assert_fact(builder).unwrap();
+
+        let modifier = env.fact_modifier(&fact).unwrap().put_int("a", 42).unwrap().put_symbol("b", "y").unwrap();
+        let updated_fact = env.modify_fact(modifier);
+        assert!(updated_fact.is_ok());
+    }
+
+    #[test]
+    fn test_fact_modifier_slot_not_found() {
+        let mut env = Environment::new().unwrap();
+        env.load_from_str("(deftemplate test_template (slot a))").unwrap();
+
+        let builder = env.fact_builder("test_template").unwrap().put_int("a", 1).unwrap();
+        let fact = env.assert_fact(builder).unwrap();
+
+        let result = env.fact_modifier(&fact).unwrap().put_int("missing", 2);
+        assert!(matches!(result, Err(ClipsError::PutSlotSlotNotFoundError(_))));
     }
 
     #[test]
