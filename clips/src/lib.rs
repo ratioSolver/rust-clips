@@ -507,7 +507,7 @@ impl Environment {
     /// Some(fact) if assertion succeeds, None if it fails.
     pub fn assert_fact(&mut self, builder: FactBuilder) -> Result<Fact, ClipsError> {
         let raw = unsafe { clips::FBAssert(builder.raw) };
-        if raw.is_null() { Err(ClipsError::AssertFactError.into()) } else { Ok(Fact::new(raw)) }
+        if raw.is_null() { Err(ClipsError::AssertFactError.into()) } else { Ok(Fact::new(self.raw, raw)) }
     }
 
     /// Modifies a fact using a fact modifier built with `fact_modifier`.
@@ -521,7 +521,7 @@ impl Environment {
     /// Some(fact) if modification succeeds, None if it fails.
     pub fn modify_fact(&mut self, modifier: FactModifier) -> Result<Fact, ClipsError> {
         let raw = unsafe { clips::FMModify(modifier.raw) };
-        if raw.is_null() { Err(ClipsError::AssertFactError.into()) } else { Ok(Fact::new(raw)) }
+        if raw.is_null() { Err(ClipsError::AssertFactError.into()) } else { Ok(Fact::new(self.raw, raw)) }
     }
 
     /// Registers a user-defined function (UDF) in the environment.
@@ -880,18 +880,31 @@ impl Drop for FactModifier {
 /// Facts are automatically retracted when dropped.
 #[derive(Debug)]
 pub struct Fact {
+    env: *mut clips::Environment,
     raw: *mut clips::Fact,
 }
 
 impl Fact {
-    fn new(raw: *mut clips::Fact) -> Self {
-        Self { raw }
+    fn new(env: *mut clips::Environment, raw: *mut clips::Fact) -> Self {
+        Self { env, raw }
     }
 }
 
 impl Drop for Fact {
     fn drop(&mut self) {
         unsafe { clips::Retract(self.raw) };
+    }
+}
+
+impl Display for Fact {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        unsafe {
+            let sb = clips::CreateStringBuilder(self.env, 128);
+            clips::FactPPForm(self.raw, sb, false);
+            let res = write!(f, "{}", CStr::from_ptr((*sb).contents).to_string_lossy());
+            clips::SBDispose(sb);
+            res
+        }
     }
 }
 
