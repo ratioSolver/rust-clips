@@ -565,7 +565,7 @@ impl Environment {
     {
         let name_cstr = CString::new(name).unwrap();
         let return_types_cstr = CString::new(return_types.map_or("v".to_string(), |t| Type::format(&t))).unwrap();
-        let arg_types_cstr = CString::new(if arg_types.is_empty() { "*".to_string() } else { arg_types.iter().map(|t| Type::format(t)).collect::<Vec<_>>().join(";") }).unwrap();
+        let arg_types_cstr = CString::new(if arg_types.is_empty() { "*".to_string() } else { ";".to_string() + &arg_types.iter().map(|t| Type::format(t)).collect::<Vec<_>>().join(";") }).unwrap();
 
         let boxed_f: Box<dyn FnMut(&mut Self, &mut UDFContext) -> ClipsValue> = Box::new(function);
         let user_data = Box::into_raw(Box::new(boxed_f)) as *mut std::ffi::c_void;
