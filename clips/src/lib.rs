@@ -517,9 +517,9 @@ impl Environment {
     /// # Returns
     ///
     /// Some(fact) if modification succeeds, None if it fails.
-    pub fn modify_fact(&mut self, modifier: FactModifier) -> Result<Fact, ClipsError> {
+    pub fn modify_fact(&mut self, modifier: FactModifier) -> Result<(), ClipsError> {
         let raw = unsafe { clips::FMModify(modifier.raw) };
-        if raw.is_null() { Err(ClipsError::AssertFactError.into()) } else { Ok(Fact::new(self.raw, raw)) }
+        if raw.is_null() { Err(ClipsError::AssertFactError.into()) } else { Ok(()) }
     }
 
     /// Registers a user-defined function (UDF) in the environment.
