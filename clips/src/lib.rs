@@ -72,7 +72,6 @@
 //! # use clips::Environment;
 //! # let mut env = Environment::new().unwrap();
 //! # env.load_from_str("(deffacts startup (initial-fact))").unwrap();
-//! env.reset();  // Initialize the environment with deffacts
 //! let rule_count = env.run(-1);  // Run all rules (-1 = unlimited)
 //! println!("Fired {} rules", rule_count);
 //! ```
@@ -241,7 +240,6 @@
 //!     )?;
 //!
 //!     // Run the inference engine
-//!     env.reset();
 //!     env.run(-1);
 //!
 //!     Ok(())
@@ -1181,7 +1179,6 @@ mod tests {
         .unwrap();
 
         env.load_from_str("(defrule test_rule => (test_udf))").unwrap();
-        env.reset();
         env.run(-1);
 
         assert!(called.load(std::sync::atomic::Ordering::SeqCst));
@@ -1203,7 +1200,6 @@ mod tests {
         .unwrap();
 
         env.load_from_str("(defrule test_rule_args => (test_udf_args 42))").unwrap();
-        env.reset();
         env.run(-1);
 
         assert_eq!(value.load(std::sync::atomic::Ordering::SeqCst), 42);
