@@ -23,7 +23,6 @@ fn main() {
 
     // 2. Generate Bindings
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
-    println!("cargo:rustc-link-search=native={}", out_path.display());
 
     let header_path = clips_source_path.join("clips.h");
     let bindings = bindgen::Builder::default().header(header_path.to_string_lossy()).clang_arg(format!("-I{}", clips_source_dir)).parse_callbacks(Box::new(bindgen::CargoCallbacks::new())).generate().expect("Unable to generate bindings");
