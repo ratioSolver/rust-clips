@@ -990,6 +990,24 @@ pub enum ClipsValue {
     Multifield(Vec<ClipsValue>),
 }
 
+fn multifield_to_vec(multifield: *mut clips::Multifield) -> Vec<ClipsValue> {
+    if multifield.is_null() {
+        return Vec::new();
+    }
+
+    let length = unsafe { (*multifield).length };
+    if length == 0 {
+        return Vec::new();
+    }
+
+    unsafe {
+        // `multifield::contents` is a C flexible array member (FAM).
+        // Bindgen exposes it as `[CLIPSValue; 1]`, so we must build the real slice manually.
+        let base = std::ptr::addr_of!((*multifield).contents) as *const clips::CLIPSValue;
+        std::slice::from_raw_parts(base, length).iter().copied().map(ClipsValue::from).collect::<Vec<_>>()
+    }
+}
+
 impl From<clips::clipsValue> for ClipsValue {
     fn from(value: clips::clipsValue) -> Self {
         match unsafe { (*value.__bindgen_anon_1.header).type_ as u32 } {
@@ -1004,7 +1022,7 @@ impl From<clips::clipsValue> for ClipsValue {
             clips::FLOAT_TYPE => ClipsValue::Float(unsafe { (*value.__bindgen_anon_1.floatValue).contents }),
             clips::INTEGER_TYPE => ClipsValue::Integer(unsafe { (*value.__bindgen_anon_1.integerValue).contents }),
             clips::VOID_TYPE => ClipsValue::Void(),
-            clips::MULTIFIELD_TYPE => ClipsValue::Multifield((0..unsafe { (*value.__bindgen_anon_1.multifieldValue).length }).map(|index| unsafe { *(*value.__bindgen_anon_1.multifieldValue).contents.get_unchecked(index as usize) }.into()).collect::<Vec<_>>()),
+            clips::MULTIFIELD_TYPE => ClipsValue::Multifield(multifield_to_vec(unsafe { value.__bindgen_anon_1.multifieldValue })),
             _ => unreachable!(),
         }
     }
@@ -1024,7 +1042,7 @@ impl From<clips::UDFValue> for ClipsValue {
             clips::FLOAT_TYPE => ClipsValue::Float(unsafe { (*value.__bindgen_anon_1.floatValue).contents }),
             clips::INTEGER_TYPE => ClipsValue::Integer(unsafe { (*value.__bindgen_anon_1.integerValue).contents }),
             clips::VOID_TYPE => ClipsValue::Void(),
-            clips::MULTIFIELD_TYPE => ClipsValue::Multifield((0..unsafe { (*value.__bindgen_anon_1.multifieldValue).length }).map(|index| unsafe { *(*value.__bindgen_anon_1.multifieldValue).contents.get_unchecked(index as usize) }.into()).collect::<Vec<_>>()),
+            clips::MULTIFIELD_TYPE => ClipsValue::Multifield(multifield_to_vec(unsafe { value.__bindgen_anon_1.multifieldValue })),
             _ => unreachable!(),
         }
     }
@@ -1203,6 +1221,60 @@ mod tests {
         env.run(-1);
 
         assert_eq!(value.load(std::sync::atomic::Ordering::SeqCst), 42);
+    }
+
+    #[test]
+    fn test_add_udf_with_multifield_argument() {
+        let mut env = Environment::new().unwrap();
+        let called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let valid = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let called_clone = called.clone();
+        let valid_clone = valid.clone();
+
+        env.add_udf("test_udf_multifield", Some(Type(Type::VOID)), 1, 1, vec![Type(Type::MULTIFIELD)], move |_env, ctx| {
+            called_clone.store(true, std::sync::atomic::Ordering::SeqCst);
+            let arg = ctx.get_next_argument(Type(Type::MULTIFIELD)).unwrap();
+            let is_valid = match arg {
+                ClipsValue::Multifield(vals) => vals.len() == 4 && matches!(vals[0], ClipsValue::Integer(1)) && matches!(vals[1], ClipsValue::Float(v) if (v - 2.5).abs() < f64::EPSILON) && matches!(vals[2], ClipsValue::Symbol(ref s) if s == "hello") && matches!(vals[3], ClipsValue::String(ref s) if s == "world"),
+                _ => false,
+            };
+            valid_clone.store(is_valid, std::sync::atomic::Ordering::SeqCst);
+            ClipsValue::Void()
+        })
+        .unwrap();
+
+        env.load_from_str("(defrule test_rule_multifield => (test_udf_multifield (create$ 1 2.5 hello \"world\")))").unwrap();
+        env.run(-1);
+
+        assert!(called.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(valid.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_add_udf_with_empty_multifield_argument() {
+        let mut env = Environment::new().unwrap();
+        let called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let len = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(usize::MAX));
+        let called_clone = called.clone();
+        let len_clone = len.clone();
+
+        env.add_udf("test_udf_empty_multifield", Some(Type(Type::VOID)), 1, 1, vec![Type(Type::MULTIFIELD)], move |_env, ctx| {
+            called_clone.store(true, std::sync::atomic::Ordering::SeqCst);
+            let arg = ctx.get_next_argument(Type(Type::MULTIFIELD)).unwrap();
+            let length = match arg {
+                ClipsValue::Multifield(vals) => vals.len(),
+                _ => usize::MAX,
+            };
+            len_clone.store(length, std::sync::atomic::Ordering::SeqCst);
+            ClipsValue::Void()
+        })
+        .unwrap();
+
+        env.load_from_str("(defrule test_rule_empty_multifield => (test_udf_empty_multifield (create$)))").unwrap();
+        env.run(-1);
+
+        assert!(called.load(std::sync::atomic::Ordering::SeqCst));
+        assert_eq!(len.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 
     #[test]
