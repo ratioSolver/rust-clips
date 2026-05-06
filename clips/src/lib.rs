@@ -274,6 +274,10 @@ pub enum ClipsError {
     PutSlotSlotNotFoundError(String),
     /// Type mismatch when setting a slot value (contains the slot name).
     PutSlotTypeError(String),
+    /// Invalid range for a slot value (contains the slot name).
+    PutSlotRangeError(String),
+    /// Invalid value for a slot (contains the slot name).
+    PutSlotAllowedValuesError(String),
     /// Failed to create a multifield builder.
     MultifieldBuilderError(String),
     /// Failed to assert a fact built with the fact builder.
@@ -300,6 +304,8 @@ impl Display for ClipsError {
             ClipsError::DeftemplateNotFoundError(s) => write!(f, "Deftemplate not found: {s}"),
             ClipsError::PutSlotSlotNotFoundError(s) => write!(f, "Slot not found: {s}"),
             ClipsError::PutSlotTypeError(s) => write!(f, "Type error for slot: {s}"),
+            ClipsError::PutSlotRangeError(s) => write!(f, "Range error for slot: {s}"),
+            ClipsError::PutSlotAllowedValuesError(s) => write!(f, "Allowed values error for slot: {s}"),
             ClipsError::MultifieldBuilderError(s) => write!(f, "Failed to create multifield builder: {s}"),
             ClipsError::AssertFactError => write!(f, "Failed to assert fact"),
             ClipsError::AddUDFMinExceedsMaxError(s) => write!(f, "Minimum number of arguments exceeds maximum for UDF '{s}'"),
@@ -707,6 +713,7 @@ impl FactBuilder {
             clips::PutSlotError_PSE_NO_ERROR => Ok(self),
             clips::PutSlotError_PSE_SLOT_NOT_FOUND_ERROR => Err(ClipsError::PutSlotSlotNotFoundError(slot_name.to_owned()).into()),
             clips::PutSlotError_PSE_TYPE_ERROR => Err(ClipsError::PutSlotTypeError(slot_name.to_owned()).into()),
+            clips::PutSlotError_PSE_RANGE_ERROR => Err(ClipsError::PutSlotRangeError(slot_name.to_owned()).into()),
             _ => unreachable!(),
         }
     }
@@ -724,6 +731,7 @@ impl FactBuilder {
             clips::PutSlotError_PSE_NO_ERROR => Ok(self),
             clips::PutSlotError_PSE_SLOT_NOT_FOUND_ERROR => Err(ClipsError::PutSlotSlotNotFoundError(slot_name.to_owned()).into()),
             clips::PutSlotError_PSE_TYPE_ERROR => Err(ClipsError::PutSlotTypeError(slot_name.to_owned()).into()),
+            clips::PutSlotError_PSE_ALLOWED_VALUES_ERROR => Err(ClipsError::PutSlotAllowedValuesError(slot_name.to_owned()).into()),
             _ => unreachable!(),
         }
     }
@@ -1289,5 +1297,21 @@ mod tests {
         let mut env = Environment::new().unwrap();
         let result = env.build("(deftemplate test_build_template");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_put_slot_range_error() {
+        let mut env = Environment::new().unwrap();
+        env.load_from_str("(deftemplate test_range_template (slot value (type FLOAT) (range 0.0 10.0)))").unwrap();
+        let result = env.fact_builder("test_range_template").unwrap().put_float("value", 99.0);
+        assert!(matches!(result, Err(ClipsError::PutSlotRangeError(_))));
+    }
+
+    #[test]
+    fn test_put_slot_allowed_values_error() {
+        let mut env = Environment::new().unwrap();
+        env.load_from_str("(deftemplate test_allowed_template (slot color (allowed-symbols red green blue)))").unwrap();
+        let result = env.fact_builder("test_allowed_template").unwrap().put_symbol("color", "yellow");
+        assert!(matches!(result, Err(ClipsError::PutSlotAllowedValuesError(_))));
     }
 }
