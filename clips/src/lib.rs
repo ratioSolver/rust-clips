@@ -1190,6 +1190,30 @@ mod tests {
     }
 
     #[test]
+    fn test_fact_modifier_range_error() {
+        let mut env = Environment::new().unwrap();
+        env.load_from_str("(deftemplate test_range_template (slot value (type FLOAT) (range 0.0 10.0)))").unwrap();
+
+        let builder = env.fact_builder("test_range_template").unwrap().put_float("value", 5.0).unwrap();
+        let fact = env.assert_fact(builder).unwrap();
+
+        let result = env.fact_modifier(&fact).unwrap().put_float("value", 99.0);
+        assert!(matches!(result, Err(ClipsError::PutSlotRangeError(_))));
+    }
+
+    #[test]
+    fn test_fact_modifier_allowed_values_error() {
+        let mut env = Environment::new().unwrap();
+        env.load_from_str("(deftemplate test_allowed_template (slot color (allowed-symbols red green blue)))").unwrap();
+
+        let builder = env.fact_builder("test_allowed_template").unwrap().put_symbol("color", "red").unwrap();
+        let fact = env.assert_fact(builder).unwrap();
+
+        let result = env.fact_modifier(&fact).unwrap().put_symbol("color", "yellow");
+        assert!(matches!(result, Err(ClipsError::PutSlotAllowedValuesError(_))));
+    }
+
+    #[test]
     fn test_multifield_builder() {
         let env = Environment::new().unwrap();
         let multifield = env.multifield_builder(3).unwrap().put_int(42).put_float(3.14).put_symbol("test_symbol").create();
