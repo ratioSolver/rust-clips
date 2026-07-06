@@ -697,6 +697,7 @@ impl FactBuilder {
             clips::PutSlotError_PSE_NO_ERROR => Ok(self),
             clips::PutSlotError_PSE_SLOT_NOT_FOUND_ERROR => Err(ClipsError::PutSlotSlotNotFoundError(slot_name.to_owned()).into()),
             clips::PutSlotError_PSE_TYPE_ERROR => Err(ClipsError::PutSlotTypeError(slot_name.to_owned()).into()),
+            clips::PutSlotError_PSE_RANGE_ERROR => Err(ClipsError::PutSlotRangeError(slot_name.to_owned()).into()),
             _ => unreachable!(),
         }
     }
@@ -803,6 +804,7 @@ impl FactModifier {
             clips::PutSlotError_PSE_NO_ERROR => Ok(self),
             clips::PutSlotError_PSE_SLOT_NOT_FOUND_ERROR => Err(ClipsError::PutSlotSlotNotFoundError(slot_name.to_owned()).into()),
             clips::PutSlotError_PSE_TYPE_ERROR => Err(ClipsError::PutSlotTypeError(slot_name.to_owned()).into()),
+            clips::PutSlotError_PSE_RANGE_ERROR => Err(ClipsError::PutSlotRangeError(slot_name.to_owned()).into()),
             _ => unreachable!(),
         }
     }
@@ -819,6 +821,7 @@ impl FactModifier {
             clips::PutSlotError_PSE_NO_ERROR => Ok(self),
             clips::PutSlotError_PSE_SLOT_NOT_FOUND_ERROR => Err(ClipsError::PutSlotSlotNotFoundError(slot_name.to_owned()).into()),
             clips::PutSlotError_PSE_TYPE_ERROR => Err(ClipsError::PutSlotTypeError(slot_name.to_owned()).into()),
+            clips::PutSlotError_PSE_RANGE_ERROR => Err(ClipsError::PutSlotRangeError(slot_name.to_owned()).into()),
             _ => unreachable!(),
         }
     }
@@ -836,6 +839,7 @@ impl FactModifier {
             clips::PutSlotError_PSE_NO_ERROR => Ok(self),
             clips::PutSlotError_PSE_SLOT_NOT_FOUND_ERROR => Err(ClipsError::PutSlotSlotNotFoundError(slot_name.to_owned()).into()),
             clips::PutSlotError_PSE_TYPE_ERROR => Err(ClipsError::PutSlotTypeError(slot_name.to_owned()).into()),
+            clips::PutSlotError_PSE_ALLOWED_VALUES_ERROR => Err(ClipsError::PutSlotAllowedValuesError(slot_name.to_owned()).into()),
             _ => unreachable!(),
         }
     }
