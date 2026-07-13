@@ -533,7 +533,7 @@ impl Environment {
     /// # Arguments
     ///
     /// * `name` - Function name as callable from CLIPS
-    /// * `return_types` - Expected return type(s), or None for any type
+    /// * `return_types` - Expected return types for the function
     /// * `min_args` - Minimum number of arguments
     /// * `max_args` - Maximum number of arguments
     /// * `arg_types` - Expected argument types for each argument position
