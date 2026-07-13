@@ -85,10 +85,10 @@
 //! # let mut env = Environment::new().unwrap();
 //! env.add_udf(
 //!     "double",
-//!     Some(Type(Type::INTEGER)),
+//!     vec![Type(Type::INTEGER), Type(Type::VOID)],
 //!     1,
 //!     1,
-//!     vec![Type(Type::INTEGER)],
+//!     vec![vec![Type(Type::INTEGER)]],
 //!     |_env, ctx| {
 //!         if let Some(ClipsValue::Integer(n)) = ctx.get_next_argument(Type(Type::INTEGER)) {
 //!             ClipsValue::Integer(n * 2)
@@ -536,7 +536,7 @@ impl Environment {
     /// * `return_types` - Expected return type(s), or None for any type
     /// * `min_args` - Minimum number of arguments
     /// * `max_args` - Maximum number of arguments
-    /// * `arg_types` - Vector of expected argument types
+    /// * `arg_types` - Expected argument types for each argument position
     /// * `function` - Rust closure implementing the function
     ///
     /// # Errors
@@ -550,10 +550,10 @@ impl Environment {
     /// # let mut env = Environment::new().unwrap();
     /// env.add_udf(
     ///     "double",
-    ///     Some(Type(Type::INTEGER)),
+    ///     vec![Type(Type::VOID), Type(Type::INTEGER)],
     ///     1,
     ///     1,
-    ///     vec![Type(Type::INTEGER)],
+    ///     vec![vec![Type(Type::INTEGER)]],
     ///     |_env, ctx| {
     ///         if let Some(ClipsValue::Integer(n)) = ctx.get_next_argument(Type(Type::INTEGER)) {
     ///             ClipsValue::Integer(n * 2)
@@ -563,14 +563,13 @@ impl Environment {
     ///     },
     /// ).unwrap();
     /// ```
-    pub fn add_udf<F>(&mut self, name: &str, return_types: Option<Type>, min_args: u16, max_args: u16, arg_types: Vec<Type>, function: F) -> Result<(), ClipsError>
+    pub fn add_udf<F>(&mut self, name: &str, return_types: Vec<Type>, min_args: u16, max_args: u16, arg_types: Vec<Vec<Type>>, function: F) -> Result<(), ClipsError>
     where
         F: FnMut(&mut Self, &mut UDFContext) -> ClipsValue + 'static,
     {
         let name_cstr = CString::new(name).unwrap();
-        let return_types_cstr = CString::new(return_types.map_or("v".to_string(), |t| Type::format(&t))).unwrap();
-        let arg_types_cstr = CString::new(if arg_types.is_empty() { "*".to_string() } else { ";".to_string() + &arg_types.iter().map(|t| Type::format(t)).collect::<Vec<_>>().join(";") }).unwrap();
-
+        let return_types_cstr = CString::new(if return_types.is_empty() { "*".to_string() } else { return_types.iter().map(Type::format).collect::<String>() }).unwrap();
+        let arg_types_cstr = CString::new(if arg_types.is_empty() { "*".to_string() } else { ";".to_string() + &arg_types.iter().map(|types| types.iter().map(Type::format).collect::<String>()).collect::<Vec<String>>().join(";") }).unwrap();
         let boxed_f: Box<dyn FnMut(&mut Self, &mut UDFContext) -> ClipsValue> = Box::new(function);
         let user_data = Box::into_raw(Box::new(boxed_f)) as *mut std::ffi::c_void;
 
@@ -1226,7 +1225,7 @@ mod tests {
         let called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let called_clone = called.clone();
 
-        env.add_udf("test_udf", Some(Type(Type::VOID)), 0, 0, vec![], move |_env, _ctx| {
+        env.add_udf("test_udf", vec![Type(Type::VOID)], 0, 0, vec![], move |_env, _ctx| {
             called_clone.store(true, std::sync::atomic::Ordering::SeqCst);
             ClipsValue::Void()
         })
@@ -1244,7 +1243,7 @@ mod tests {
         let value = std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0));
         let value_clone = value.clone();
 
-        env.add_udf("test_udf_args", Some(Type(Type::VOID)), 1, 1, vec![Type(Type::INTEGER)], move |_env, ctx| {
+        env.add_udf("test_udf_args", vec![Type(Type::VOID)], 1, 1, vec![vec![Type(Type::INTEGER)]], move |_env, ctx| {
             let arg = ctx.get_next_argument(Type(Type::INTEGER)).unwrap();
             if let ClipsValue::Integer(i) = arg {
                 value_clone.store(i, std::sync::atomic::Ordering::SeqCst);
@@ -1267,7 +1266,7 @@ mod tests {
         let called_clone = called.clone();
         let valid_clone = valid.clone();
 
-        env.add_udf("test_udf_multifield", Some(Type(Type::VOID)), 1, 1, vec![Type(Type::MULTIFIELD)], move |_env, ctx| {
+        env.add_udf("test_udf_multifield", vec![Type(Type::VOID)], 1, 1, vec![vec![Type(Type::MULTIFIELD)]], move |_env, ctx| {
             called_clone.store(true, std::sync::atomic::Ordering::SeqCst);
             let arg = ctx.get_next_argument(Type(Type::MULTIFIELD)).unwrap();
             let is_valid = match arg {
@@ -1294,7 +1293,7 @@ mod tests {
         let called_clone = called.clone();
         let len_clone = len.clone();
 
-        env.add_udf("test_udf_empty_multifield", Some(Type(Type::VOID)), 1, 1, vec![Type(Type::MULTIFIELD)], move |_env, ctx| {
+        env.add_udf("test_udf_empty_multifield", vec![Type(Type::VOID)], 1, 1, vec![vec![Type(Type::MULTIFIELD)]], move |_env, ctx| {
             called_clone.store(true, std::sync::atomic::Ordering::SeqCst);
             let arg = ctx.get_next_argument(Type(Type::MULTIFIELD)).unwrap();
             let length = match arg {
